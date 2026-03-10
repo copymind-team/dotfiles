@@ -1,6 +1,6 @@
 # dotfiles
 
-My personal configuration files for nvim, tmux, and ghostty. Managed with [GNU Stow](https://www.gnu.org/software/stow/).
+My personal configuration files for nvim, tmux, ghostty, and zsh. Managed with [GNU Stow](https://www.gnu.org/software/stow/).
 
 ## Structure
 
@@ -8,13 +8,20 @@ My personal configuration files for nvim, tmux, and ghostty. Managed with [GNU S
 dotfiles/
 ├── nvim/.config/nvim/
 ├── tmux/.tmux.conf
-└── ghostty/.config/ghostty/config
+├── ghostty/.config/ghostty/config
+└── zsh/.zshrc
 ```
 
 ## Requirements
 
 ```bash
 brew install stow
+```
+
+Oh My Zsh:
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 ```
 
 ## Installation
@@ -25,6 +32,7 @@ cd ~/dotfiles
 stow neovim
 stow tmux
 stow ghostty
+stow zsh
 ```
 
 This creates symlinks from the expected config locations to the files in this repo.
