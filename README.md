@@ -1,54 +1,48 @@
 # dotfiles
 
-My personal configuration files for nvim, tmux, ghostty, and zsh. Managed with [GNU Stow](https://www.gnu.org/software/stow/).
+Team configuration files for nvim, tmux, ghostty, zsh.
+
+## What's included
+
+| Tool | What it does |
+|------|-------------|
+| [Ghostty](https://ghostty.org/) | GPU-accelerated terminal emulator |
+| [Neovim](https://neovim.io/) | Text editor, used as the primary IDE |
+| [tmux](https://github.com/tmux/tmux) | Terminal multiplexer — split panes, persistent sessions |
+| [Zsh](https://www.zsh.org/) + [Oh My Zsh](https://ohmyz.sh/) | Shell with plugins, themes, and better defaults |
+| [Homebrew](https://brew.sh/) | macOS package manager, installs everything above |
+| [ripgrep](https://github.com/BurntSushi/ripgrep) | Fast recursive code search, used by Neovim's Telescope |
+| [TPM](https://github.com/tmux-plugins/tpm) | Tmux Plugin Manager, auto-installs tmux plugins |
 
 ## Structure
 
 ```
 dotfiles/
-├── nvim/.config/nvim/
+├── ghostty/.config/ghostty/
+├── neovim/.config/nvim/
 ├── tmux/.tmux.conf
-├── ghostty/.config/ghostty/config
-└── zsh/.zshrc
-```
-
-## Requirements
-
-```bash
-brew install stow
-```
-
-Oh My Zsh:
-
-```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+├── zsh/.zshrc
+└── install.sh
 ```
 
 ## Installation
 
 ```bash
-git clone https://github.com/copymind-ai/dotfiles.git ~/dotfiles
-cd ~/dotfiles
-stow neovim
-stow tmux
-stow ghostty
-stow zsh
+git clone https://github.com/copymind-ai/dotfiles.git
+cd dotfiles
+./install.sh
 ```
 
-This creates symlinks from the expected config locations to the files in this repo.
+The install script will install all tools from the table above and symlink configs to their expected locations. Existing config files are backed up with a `.bak` suffix before symlinking.
 
 ## Adding a new config
 
 1. Move the config file/folder into the dotfiles repo, mirroring the home directory structure
-2. Run `stow <package>` to create the symlink
+2. Add a `link` entry in `install.sh`
 3. Commit and push
 
 ## Keeping in sync
 
 ```bash
-# pull latest changes
-cd ~/dotfiles && git pull
-
-# push changes after editing configs
-cd ~/dotfiles && git add . && git commit -m "update" && git push
+git pull && ./install.sh
 ```
