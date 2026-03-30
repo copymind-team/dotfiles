@@ -30,7 +30,7 @@ else
 fi
 
 # --- Packages ---
-for pkg in tmux neovim; do
+for pkg in tmux neovim ripgrep; do
   if ! command -v "$pkg" &>/dev/null; then
     info "Installing $pkg..."
     brew install "$pkg"

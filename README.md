@@ -1,6 +1,18 @@
 # dotfiles
 
-Team configuration files for nvim, tmux, ghostty zsh.
+Team configuration files for nvim, tmux, ghostty, zsh.
+
+## What's included
+
+| Tool | What it does |
+|------|-------------|
+| [Ghostty](https://ghostty.org/) | GPU-accelerated terminal emulator |
+| [Neovim](https://neovim.io/) | Text editor, used as the primary IDE |
+| [tmux](https://github.com/tmux/tmux) | Terminal multiplexer — split panes, persistent sessions |
+| [Zsh](https://www.zsh.org/) + [Oh My Zsh](https://ohmyz.sh/) | Shell with plugins, themes, and better defaults |
+| [Homebrew](https://brew.sh/) | macOS package manager, installs everything above |
+| [ripgrep](https://github.com/BurntSushi/ripgrep) | Fast recursive code search, used by Neovim's Telescope |
+| [TPM](https://github.com/tmux-plugins/tpm) | Tmux Plugin Manager, auto-installs tmux plugins |
 
 ## Structure
 
@@ -21,15 +33,7 @@ cd dotfiles
 ./install.sh
 ```
 
-The install script will:
-
-- Install Homebrew (if missing)
-- Install tmux and neovim via brew
-- Install Oh My Zsh
-- Symlink all configs to their expected locations
-- Install TPM and tmux plugins
-
-Existing config files are backed up with a `.bak` suffix before symlinking.
+The install script will install all tools from the table above and symlink configs to their expected locations. Existing config files are backed up with a `.bak` suffix before symlinking.
 
 ## Adding a new config
 
