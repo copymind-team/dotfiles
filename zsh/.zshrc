@@ -34,3 +34,8 @@ export NVM_DIR="$HOME/.nvm"
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
+export PATH="$HOME/bin:$PATH"
+
+# Dev session shortcut — resolves dotfiles root from .zshrc symlink
+DOTFILES_DIR="$(dirname $(readlink ~/.zshrc))/.."
+alias dev="$DOTFILES_DIR/scripts/tmux-dev-session.sh"
