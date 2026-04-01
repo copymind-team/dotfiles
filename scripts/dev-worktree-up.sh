@@ -9,8 +9,8 @@ set -euo pipefail
 if [ -z "${1:-}" ]; then
   echo "Error: branch name is required." >&2
   echo "" >&2
-  echo "Usage: wt up <branch-name>" >&2
-  echo "Example: wt up feat-new-chat" >&2
+  echo "Usage: dev worktree up <branch-name>" >&2
+  echo "Example: dev wt up feat-new-chat" >&2
   exit 1
 fi
 

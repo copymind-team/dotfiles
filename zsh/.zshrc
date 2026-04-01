@@ -38,5 +38,4 @@ export PATH="$HOME/bin:$PATH"
 
 # Dotfiles scripts — resolves root from .zshrc symlink
 DOTFILES_DIR="$(dirname $(readlink ~/.zshrc))/.."
-alias dev="$DOTFILES_DIR/scripts/tmux-dev-session.sh"
-alias wt="$DOTFILES_DIR/scripts/git-worktree.sh"
+alias dev="$DOTFILES_DIR/scripts/dev.sh"
