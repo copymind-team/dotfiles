@@ -42,8 +42,8 @@ fi
 
 # --- Initialize registry if missing ---
 if [ ! -f "$REGISTRY" ]; then
-  printf "# worktree\tport\tcreated\n" > "$REGISTRY"
-  printf "%s\t3000\t%s\n" "$CURRENT_WORKTREE_NAME" "$(date +%Y-%m-%d)" >> "$REGISTRY"
+  printf "# worktree\tport\tcreated\n" >"$REGISTRY"
+  printf "%s\t3000\t%s\n" "$CURRENT_WORKTREE_NAME" "$(date +%Y-%m-%d)" >>"$REGISTRY"
   echo "Initialized port registry at $REGISTRY"
 fi
 
@@ -67,7 +67,7 @@ if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME" 2>/dev/null; then
   git worktree add "$NEW_WORKTREE_DIR" "$BRANCH_NAME"
 elif git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
   echo "Branch $BRANCH_NAME exists on origin, fetching and checking out..."
-  git fetch origin "$BRANCH_NAME"
+  git fetch origin "$BRANCH_NAME":"$BRANCH_NAME"
   git worktree add "$NEW_WORKTREE_DIR" "$BRANCH_NAME"
 else
   echo "Creating worktree at $NEW_WORKTREE_DIR on new branch $BRANCH_NAME from origin/main..."
@@ -83,11 +83,11 @@ else
 fi
 
 # --- Generate .env for Docker Compose project name ---
-echo "COMPOSE_PROJECT_NAME=${REPO_NAME}-${SAFE_NAME}" > "$NEW_WORKTREE_DIR/.env"
+echo "COMPOSE_PROJECT_NAME=${REPO_NAME}-${SAFE_NAME}" >"$NEW_WORKTREE_DIR/.env"
 echo "Generated .env with COMPOSE_PROJECT_NAME"
 
 # --- Generate docker-compose.override.yml ---
-cat > "$NEW_WORKTREE_DIR/docker-compose.override.yml" <<EOF
+cat >"$NEW_WORKTREE_DIR/docker-compose.override.yml" <<EOF
 services:
   app:
     container_name: ${REPO_NAME}-${SAFE_NAME}
@@ -97,7 +97,7 @@ EOF
 echo "Generated docker-compose.override.yml (host port $NEW_PORT -> container 3000)"
 
 # --- Register port ---
-printf "%s\t%s\t%s\n" "$SAFE_NAME" "$NEW_PORT" "$(date +%Y-%m-%d)" >> "$REGISTRY"
+printf "%s\t%s\t%s\n" "$SAFE_NAME" "$NEW_PORT" "$(date +%Y-%m-%d)" >>"$REGISTRY"
 echo "Registered in $REGISTRY"
 
 # --- Install dependencies ---
