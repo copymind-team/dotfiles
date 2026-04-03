@@ -26,10 +26,11 @@ if [ -f "$WORKTREE_DIR/supabase/config.toml" ] && command -v supabase &>/dev/nul
     echo "Injecting Supabase env vars..."
     STATUS_JSON="$(supabase status --output json)"
 
-    upsert_env "$ENV_FILE" "NEXT_PUBLIC_SUPABASE_URL" "$(echo "$STATUS_JSON" | jq -r '.["API URL"]')"
-    upsert_env "$ENV_FILE" "NEXT_PUBLIC_SUPABASE_ANON_KEY" "$(echo "$STATUS_JSON" | jq -r '.["anon key"]')"
-    upsert_env "$ENV_FILE" "SUPABASE_SERVICE_ROLE_KEY" "$(echo "$STATUS_JSON" | jq -r '.["service_role key"]')"
-    upsert_env "$ENV_FILE" "DATABASE_URL" "$(echo "$STATUS_JSON" | jq -r '.["DB URL"]')"
+    upsert_env "$ENV_FILE" "NEXT_PUBLIC_SUPABASE_URL" "$(echo "$STATUS_JSON" | jq -r '.API_URL')"
+    upsert_env "$ENV_FILE" "NEXT_PUBLIC_SUPABASE_URL_PRIMARY" "$(echo "$STATUS_JSON" | jq -r '.API_URL')"
+    upsert_env "$ENV_FILE" "NEXT_PUBLIC_SUPABASE_ANON_KEY" "$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')"
+    upsert_env "$ENV_FILE" "SUPABASE_SERVICE_ROLE_KEY" "$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY')"
+    upsert_env "$ENV_FILE" "DATABASE_URL" "$(echo "$STATUS_JSON" | jq -r '.DB_URL')"
 
     echo "Updated $ENV_FILE with Supabase connection details."
   else
