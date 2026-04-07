@@ -49,4 +49,19 @@ else
   echo "No Supabase project detected, skipping."
 fi
 
+# --- COPYMIND_API_HOST for Supabase Edge Functions ---
+# Edge functions run inside Docker (Supabase edge runtime) and need
+# host.docker.internal to reach the app container on the host.
+# Read the allocated port from docker-compose.override.yml or default to 3000.
+APP_PORT=3000
+OVERRIDE_FILE="$WORKTREE_DIR/docker-compose.override.yml"
+if [ -f "$OVERRIDE_FILE" ]; then
+  OVERRIDE_PORT="$(grep -oE '[0-9]+:3000' "$OVERRIDE_FILE" | head -1 | cut -d: -f1)"
+  if [ -n "$OVERRIDE_PORT" ]; then
+    APP_PORT="$OVERRIDE_PORT"
+  fi
+fi
+upsert_env "$ENV_FILE" "COPYMIND_API_HOST" "http://host.docker.internal:${APP_PORT}"
+echo "Set COPYMIND_API_HOST=http://host.docker.internal:${APP_PORT}"
+
 echo "Done: $ENV_FILE"
