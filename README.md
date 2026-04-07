@@ -67,6 +67,7 @@ Must be run from inside a bare-cloned repo. Repo name and paths are detected aut
 | `dev wt up <branch>` | Create a git worktree with Docker isolation |
 | `dev wt down <branch>` | Tear down a git worktree and free the port |
 | `dev wt env` | Set up .env.local for current worktree |
+| `dev wt info` | Show info about the current worktree |
 
 ## Installation
 
