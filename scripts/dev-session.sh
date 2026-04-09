@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # Creates a tmux session with preconfigured windows for development.
-# Usage: dev-session.sh [directory]
-# Session name is derived from the directory basename.
+# Usage: dev-session.sh [-n name] [directory]
+# Session name defaults to the directory basename.
+
+SESSION_NAME=""
+while getopts "n:" opt; do
+  case $opt in
+    n) SESSION_NAME="$OPTARG" ;;
+    *) echo "Usage: dev-session.sh [-n name] [directory]" >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
 
 DIR="${1:-$(pwd)}"
 DIR="$(cd "$DIR" && pwd)" # resolve to absolute path
-SESSION="$(basename "$DIR")"
+SESSION="${SESSION_NAME:-$(basename "$DIR")}"
 
 # If already inside tmux, don't nest — just switch
 if tmux has-session -t "$SESSION" 2>/dev/null; then
