@@ -60,8 +60,8 @@ NEW_PORT=$((MAX_PORT + 1))
 echo "Allocated port $NEW_PORT for $SAFE_NAME"
 
 # --- Fetch latest and create worktree ---
-echo "Fetching origin/main..."
-git fetch origin main
+echo "Fetching origin..."
+git fetch origin
 
 if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME" 2>/dev/null; then
   echo "Local branch $BRANCH_NAME already exists, reusing it..."
@@ -72,7 +72,7 @@ elif git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; th
   git worktree add "$NEW_WORKTREE_DIR" "$BRANCH_NAME"
 else
   echo "Creating worktree at $NEW_WORKTREE_DIR on new branch $BRANCH_NAME from origin/main..."
-  git worktree add -b "$BRANCH_NAME" "$NEW_WORKTREE_DIR" FETCH_HEAD
+  git worktree add -b "$BRANCH_NAME" "$NEW_WORKTREE_DIR" origin/main
 fi
 
 # --- Copy .env.local from current worktree ---
