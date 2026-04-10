@@ -119,7 +119,11 @@ if [ -f "$NEW_WORKTREE_DIR/supabase/config.toml" ]; then
       fi
     fi
     echo "Applying Supabase migrations..."
-    (cd "$NEW_WORKTREE_DIR" && supabase migration up --local)
+    if [ -x "$NEW_WORKTREE_DIR/scripts/db-migrate-local.sh" ]; then
+      (cd "$NEW_WORKTREE_DIR" && ./scripts/db-migrate-local.sh)
+    else
+      (cd "$NEW_WORKTREE_DIR" && supabase migration up --local)
+    fi
     if [ "${RESTORE_DB_PORT:-}" = true ]; then
       (cd "$NEW_WORKTREE_DIR" && git checkout -- supabase/config.toml)
     fi
