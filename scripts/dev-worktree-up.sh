@@ -27,7 +27,7 @@ fi
 # --- Resolve paths from current worktree ---
 CURRENT_WORKTREE="$(git rev-parse --show-toplevel)"
 PARENT_DIR="$(cd "$CURRENT_WORKTREE/.." && pwd)"
-REPO_NAME="$(basename "$PARENT_DIR")"
+REPO_NAME="$(basename "$PARENT_DIR" | sed 's/\.git$//')"
 CURRENT_WORKTREE_NAME="$(basename "$CURRENT_WORKTREE")"
 
 # Sanitize branch name: replace / with - for Docker and directory naming
@@ -41,11 +41,21 @@ if [ -d "$NEW_WORKTREE_DIR" ]; then
   exit 1
 fi
 
+# --- Read base port from docker-compose.yml ---
+COMPOSE_FILE="$CURRENT_WORKTREE/docker-compose.yml"
+if [ -f "$COMPOSE_FILE" ]; then
+  BASE_PORT=$(sed -n 's/.*- *"\([0-9]*\):.*"/\1/p' "$COMPOSE_FILE" | head -1)
+fi
+if [ -z "${BASE_PORT:-}" ]; then
+  echo "Error: Could not read host port from $COMPOSE_FILE" >&2
+  exit 1
+fi
+
 # --- Initialize registry if missing ---
 if [ ! -f "$REGISTRY" ]; then
   printf "# worktree\tport\tcreated\n" >"$REGISTRY"
-  printf "%s\t3000\t%s\n" "$CURRENT_WORKTREE_NAME" "$(date +%Y-%m-%d)" >>"$REGISTRY"
-  echo "Initialized port registry at $REGISTRY"
+  printf "%s\t%s\t%s\n" "$CURRENT_WORKTREE_NAME" "$BASE_PORT" "$(date +%Y-%m-%d)" >>"$REGISTRY"
+  echo "Initialized port registry at $REGISTRY (base port $BASE_PORT)"
 fi
 
 # --- Check branch not already registered ---
@@ -54,12 +64,21 @@ if grep -q "^${SAFE_NAME}	" "$REGISTRY" 2>/dev/null; then
   exit 1
 fi
 
-# --- Allocate next port ---
+# --- Allocate next port (within 100-port interval) ---
 MAX_PORT=$(grep -v '^#' "$REGISTRY" | awk -F'\t' '{print $2}' | sort -n | tail -1)
 NEW_PORT=$((MAX_PORT + 1))
+if [ "$NEW_PORT" -ge $((BASE_PORT + 100)) ]; then
+  echo "Error: Port $NEW_PORT exceeds the 100-port interval ($BASE_PORT–$((BASE_PORT + 99))) for this repo." >&2
+  exit 1
+fi
 echo "Allocated port $NEW_PORT for $SAFE_NAME"
 
 # --- Fetch latest and create worktree ---
+# Bare clones don't configure a fetch refspec, so origin/* refs never get created.
+# Fix that before fetching so origin/main resolves properly.
+if ! git config --get remote.origin.fetch &>/dev/null; then
+  git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+fi
 echo "Fetching origin..."
 git fetch origin
 
@@ -89,43 +108,53 @@ if [ -f "$NEW_WORKTREE_DIR/supabase/config.toml" ]; then
     echo "Warning: supabase CLI not found. Skipping Supabase setup." >&2
   else
     echo "Detected Supabase project..."
+    SUPABASE_READY=false
     if supabase status --output json >/dev/null 2>&1; then
       echo "Supabase already running (shared instance)."
+      SUPABASE_READY=true
     else
       echo "Starting shared Supabase instance..."
       echo "(First run pulls ~10 Docker images and may take a few minutes)"
-      (cd "$NEW_WORKTREE_DIR" && supabase start)
-    fi
-
-    # Inject Supabase env vars into .env.local.
-    # Pass SUPABASE_STATUS_DIR so env.sh reads status from the worktree
-    # that started Supabase (which may have different ports in config.toml).
-    (cd "$NEW_WORKTREE_DIR" && SUPABASE_STATUS_DIR="$CURRENT_WORKTREE" "$SCRIPT_DIR/dev-worktree-env.sh")
-
-    # Apply pending migrations from this branch.
-    # The new worktree's config.toml may define different Supabase ports than
-    # the shared running instance (started from a different worktree).
-    # Temporarily patch the db port so `supabase migration up --local` connects
-    # to the running instance, then restore the original config.
-    RUNNING_DB_PORT="$(cd "$CURRENT_WORKTREE" && supabase status --output json 2>/dev/null \
-      | sed -n '/^{/,/^}/p' | jq -r '.DB_URL' | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')"
-    if [ -n "$RUNNING_DB_PORT" ]; then
-      WORKTREE_CONFIG="$NEW_WORKTREE_DIR/supabase/config.toml"
-      WORKTREE_DB_PORT="$(sed -n '/^\[db\]/,/^\[/{s/^port = \([0-9]*\)/\1/p;}' "$WORKTREE_CONFIG")"
-      if [ "$WORKTREE_DB_PORT" != "$RUNNING_DB_PORT" ]; then
-        echo "Patching db port $WORKTREE_DB_PORT → $RUNNING_DB_PORT for shared Supabase instance..."
-        sed -i '' "/^\[db\]/,/^\[/s/^port = ${WORKTREE_DB_PORT}/port = ${RUNNING_DB_PORT}/" "$WORKTREE_CONFIG"
-        RESTORE_DB_PORT=true
+      if (cd "$NEW_WORKTREE_DIR" && supabase start); then
+        SUPABASE_READY=true
+      else
+        echo "Warning: supabase start failed (ports may be in use by another project)." >&2
+        echo "  Check running containers: docker ps --filter name=supabase" >&2
+        echo "  Skipping Supabase env injection and migrations." >&2
       fi
     fi
-    echo "Applying Supabase migrations..."
-    if [ -x "$NEW_WORKTREE_DIR/scripts/db-migrate-local.sh" ]; then
-      (cd "$NEW_WORKTREE_DIR" && ./scripts/db-migrate-local.sh)
-    else
-      (cd "$NEW_WORKTREE_DIR" && supabase migration up --local)
-    fi
-    if [ "${RESTORE_DB_PORT:-}" = true ]; then
-      (cd "$NEW_WORKTREE_DIR" && git checkout -- supabase/config.toml)
+
+    if [ "$SUPABASE_READY" = true ]; then
+      # Inject Supabase env vars into .env.local.
+      # Pass SUPABASE_STATUS_DIR so env.sh reads status from the worktree
+      # that started Supabase (which may have different ports in config.toml).
+      (cd "$NEW_WORKTREE_DIR" && SUPABASE_STATUS_DIR="$CURRENT_WORKTREE" "$SCRIPT_DIR/dev-worktree-env.sh")
+
+      # Apply pending migrations from this branch.
+      # The new worktree's config.toml may define different Supabase ports than
+      # the shared running instance (started from a different worktree).
+      # Temporarily patch the db port so `supabase migration up --local` connects
+      # to the running instance, then restore the original config.
+      RUNNING_DB_PORT="$(cd "$CURRENT_WORKTREE" && supabase status --output json 2>/dev/null \
+        | sed -n '/^{/,/^}/p' | jq -r '.DB_URL' | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')"
+      if [ -n "$RUNNING_DB_PORT" ]; then
+        WORKTREE_CONFIG="$NEW_WORKTREE_DIR/supabase/config.toml"
+        WORKTREE_DB_PORT="$(sed -n '/^\[db\]/,/^\[/{s/^port = \([0-9]*\)/\1/p;}' "$WORKTREE_CONFIG")"
+        if [ "$WORKTREE_DB_PORT" != "$RUNNING_DB_PORT" ]; then
+          echo "Patching db port $WORKTREE_DB_PORT → $RUNNING_DB_PORT for shared Supabase instance..."
+          sed -i '' "/^\[db\]/,/^\[/s/^port = ${WORKTREE_DB_PORT}/port = ${RUNNING_DB_PORT}/" "$WORKTREE_CONFIG"
+          RESTORE_DB_PORT=true
+        fi
+      fi
+      echo "Applying Supabase migrations..."
+      if [ -x "$NEW_WORKTREE_DIR/scripts/db-migrate-local.sh" ]; then
+        (cd "$NEW_WORKTREE_DIR" && ./scripts/db-migrate-local.sh)
+      else
+        (cd "$NEW_WORKTREE_DIR" && supabase migration up --local)
+      fi
+      if [ "${RESTORE_DB_PORT:-}" = true ]; then
+        (cd "$NEW_WORKTREE_DIR" && git checkout -- supabase/config.toml)
+      fi
     fi
   fi
 fi
