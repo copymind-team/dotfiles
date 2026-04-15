@@ -20,6 +20,44 @@ upsert_env() {
   fi
 }
 
+# Classify a Supabase-related env var name by suffix, echoing the matching
+# `supabase status --output json` field (or empty if unmapped).
+# Order matters: longer/more-specific suffixes first.
+classify_supabase_var() {
+  local name="$1"
+  case "$name" in
+    DATABASE_URL|*_DATABASE_URL)           echo "DB_URL" ;;
+    JWT_SECRET)                            echo "JWT_SECRET" ;;
+    *SUPABASE*_SERVICE_ROLE_KEY)           echo "SERVICE_ROLE_KEY" ;;
+    *SUPABASE*_PUBLISHABLE_KEY)            echo "PUBLISHABLE_KEY" ;;
+    *SUPABASE*_SECRET_KEY)                 echo "SECRET_KEY" ;;
+    *SUPABASE*_ANON_KEY)                   echo "ANON_KEY" ;;
+    *SUPABASE*_URL)                        echo "API_URL" ;;
+    *)                                     echo "" ;;
+  esac
+}
+
+# Discover Supabase-related env var names by scanning source code and the
+# existing .env.local. Outputs one unique name per line.
+discover_supabase_vars() {
+  local worktree="$1" env_file="$2"
+  # `|| true` on each branch keeps pipefail from aborting the function
+  # when a scanned directory is missing or a grep finds zero matches.
+  {
+    for dir in "$worktree/src" "$worktree/app" "$worktree/supabase" "$worktree/infra"; do
+      if [ -d "$dir" ]; then
+        grep -rEoh 'process\.env\.[A-Z_]+' "$dir" 2>/dev/null \
+          | sed 's/^process\.env\.//' || true
+      fi
+    done
+    if [ -f "$env_file" ]; then
+      grep -oE '^[A-Z_][A-Z0-9_]*=' "$env_file" | tr -d '=' || true
+    fi
+  } \
+    | awk '/SUPABASE/ || $0 == "DATABASE_URL" || $0 == "JWT_SECRET"' \
+    | sort -u
+}
+
 touch "$ENV_FILE"
 
 # --- Supabase ---
@@ -32,15 +70,34 @@ if [ -f "$WORKTREE_DIR/supabase/config.toml" ] && command -v supabase &>/dev/nul
     echo "Injecting Supabase env vars..."
     STATUS_JSON="$(cd "$STATUS_DIR" && supabase status --output json 2>/dev/null | sed -n '/^{/,/^}/p')"
 
-    # Replace 127.0.0.1 with localhost so URLs resolve both from the browser
-    # and from inside Docker containers (via extra_hosts: localhost:host-gateway)
-    API_URL="$(echo "$STATUS_JSON" | jq -r '.API_URL' | sed 's/127\.0\.0\.1/localhost/')"
-    DB_URL="$(echo "$STATUS_JSON" | jq -r '.DB_URL' | sed 's/127\.0\.0\.1/localhost/')"
+    # Discover every Supabase-related env var referenced by the app or already
+    # declared in .env.local, classify each by name, and populate from the
+    # running local Supabase. Every worktree on this machine connects to the
+    # same shared local instance, so we always overwrite — remote values are
+    # never desired in local dev. URLs get 127.0.0.1 rewritten to localhost so
+    # they resolve both from the browser and inside Docker containers.
+    while IFS= read -r var_name; do
+      [ -z "$var_name" ] && continue
+      status_key="$(classify_supabase_var "$var_name")"
+      if [ -z "$status_key" ]; then
+        echo "  - skipping $var_name (no mapping)"
+        continue
+      fi
 
-    upsert_env "$ENV_FILE" "NEXT_PUBLIC_SUPABASE_URL" "$API_URL"
-    upsert_env "$ENV_FILE" "NEXT_PUBLIC_SUPABASE_ANON_KEY" "$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')"
-    upsert_env "$ENV_FILE" "SUPABASE_SERVICE_ROLE_KEY" "$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY')"
-    upsert_env "$ENV_FILE" "DATABASE_URL" "$DB_URL"
+      raw="$(echo "$STATUS_JSON" | jq -r ".${status_key} // empty")"
+      if [ -z "$raw" ]; then
+        echo "  - skipping $var_name (supabase status missing .${status_key})"
+        continue
+      fi
+
+      case "$status_key" in
+        *_URL) value="$(echo "$raw" | sed 's/127\.0\.0\.1/localhost/')" ;;
+        *)     value="$raw" ;;
+      esac
+
+      upsert_env "$ENV_FILE" "$var_name" "$value"
+      echo "  + $var_name <- .${status_key}"
+    done < <(discover_supabase_vars "$WORKTREE_DIR" "$ENV_FILE")
 
     echo "Updated $ENV_FILE with Supabase connection details."
   else
