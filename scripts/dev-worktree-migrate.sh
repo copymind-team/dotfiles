@@ -243,7 +243,7 @@ clean_stale_symlinks() {
     [ -d "$dir" ] || continue
     for f in "$dir"/*.sql; do
       [ -L "$f" ] || continue
-      resolved="$(realpath "$f" 2>/dev/null || true)"
+      resolved="$(realpath "$f" 2>/dev/null || readlink "$f")"
       if [[ "$resolved" == "$wt_path/"* ]] && [ ! -f "$resolved" ]; then
         rm "$f"
         count=$((count + 1))
