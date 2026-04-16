@@ -2,7 +2,7 @@
 
 ## Running the tests
 
-The test script is fully self-contained — it creates a temporary bare git repo, starts Supabase, runs all 11 tests, and cleans up.
+The test script is fully self-contained — it creates a temporary bare git repo, starts Supabase, runs all 12 tests, and cleans up.
 
 ### Prerequisites
 
@@ -22,7 +22,7 @@ No need to stop your existing Supabase — the test uses its own project (`test-
 1. Creates a temporary bare repo at `/tmp/dotfiles-migration-hub-test-*`
 2. Scaffolds a minimal project (config.toml, db-migrate-local.sh, docker-compose.yml, initial migration)
 3. Starts an isolated Supabase instance (project: `test-mh`, ports: `54421`/`54422`)
-4. Runs 11 test cases covering the full migration hub lifecycle
+4. Runs 12 test cases covering the full migration hub lifecycle
 5. Stops the test Supabase and removes the temp directory
 
 ### Tests
@@ -35,8 +35,9 @@ No need to stop your existing Supabase — the test uses its own project (`test-
 | 4   | Migrate — new migration    | `dev sb migrate`      | Symlinked + applied to DB                   |
 | 5   | Migrate — idempotent       | `dev sb migrate`      | Skips already-symlinked                     |
 | 6   | Migrate — second migration | `dev sb migrate`      | Only new file symlinked                     |
-| 7   | Multi-worktree coexistence | `dev wt up` + migrate | Both worktrees' symlinks coexist            |
-| 8   | Timestamp conflict         | `dev sb migrate`      | Rejected with diagnostic, exit 1            |
-| 9   | Teardown first wt          | `dev wt down`         | Only its symlinks removed, DB repaired      |
-| 10  | Teardown second wt         | `dev wt down`         | All symlinks gone, DB clean                 |
-| 11  | Post-cleanup sanity        | `dev sb migrate`      | Hub is clean, no-op                         |
+| 7   | Merged to main             | `dev sb migrate`      | Symlink replaced by real file from origin   |
+| 8   | Multi-worktree coexistence | `dev wt up` + migrate | Both worktrees' symlinks coexist            |
+| 9   | Timestamp conflict         | `dev sb migrate`      | Rejected with diagnostic, exit 1            |
+| 10  | Teardown first wt          | `dev wt down`         | Only its symlinks removed, DB repaired      |
+| 11  | Teardown second wt         | `dev wt down`         | All symlinks gone, DB clean                 |
+| 12  | Post-cleanup sanity        | `dev sb migrate`      | Hub is clean, no-op                         |

@@ -415,7 +415,46 @@ assert_symlink_count "2 symlinks total" "2" "$TEST_DIR/supabase/supabase/migrati
 assert "second table created in DB" db_table_exists "test_alpha_2"
 
 # -------------------------------------------------------------------
-header "7: Multiple worktrees — second worktree (test-beta)"
+header "7: Migration merged to main — symlink replaced by real file"
+# -------------------------------------------------------------------
+# Simulate: test-alpha's first migration gets merged to origin/main.
+# After hub refresh, the symlink should be replaced by a real file
+# and `dev sb migrate` should NOT re-link it.
+
+cd "$TEST_DIR/main"
+
+# Copy the migration into the main worktree and push to origin
+mkdir -p supabase/migrations/app
+cp "$TEST_DIR/test-alpha/supabase/migrations/app/20260418000001_test_alpha.sql" \
+   supabase/migrations/app/20260418000001_test_alpha.sql
+git add supabase/migrations/app/20260418000001_test_alpha.sql
+git commit -q -m "merge test-alpha migration"
+git push -q origin main
+
+# Verify symlink exists before refresh
+assert "symlink exists before refresh" test -L "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"
+
+# Run migrate from test-alpha — this triggers update_supabase_wt (fetch + checkout)
+cd "$TEST_DIR/test-alpha"
+OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
+
+# The first migration should now be a real file (from origin/main), not a symlink
+assert "merged migration is now a real file" test -f "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"
+assert "merged migration is NOT a symlink" test ! -L "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"
+
+# The second migration should still be a symlink (not yet merged)
+assert "unmerged migration still symlinked" test -L "$TEST_DIR/supabase/supabase/migrations/app/20260418000002_test_alpha_2.sql"
+
+# Should report no new migrations (first is real, second already symlinked)
+assert_output_contains "no new migrations after merge" "No new migrations in test-alpha" "$OUTPUT"
+assert_symlink_count "only 1 symlink remains (second migration)" "1" "$TEST_DIR/supabase/supabase/migrations"
+
+# DB should still have both versions
+assert "merged migration still in DB" db_version_exists "20260418000001"
+assert "unmerged migration still in DB" db_version_exists "20260418000002"
+
+# -------------------------------------------------------------------
+header "8: Multiple worktrees — second worktree (test-beta)"
 # -------------------------------------------------------------------
 cd "$TEST_DIR/main"
 "$SCRIPTS_DIR/dev-worktree-up.sh" test-beta >/dev/null 2>&1 || true
@@ -431,17 +470,17 @@ SQL
 OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
 
 assert_output_contains "symlinked test-beta migration" "Symlinked 1 migration" "$OUTPUT"
-assert_symlink_count "3 symlinks total (2 alpha + 1 beta)" "3" "$TEST_DIR/supabase/supabase/migrations"
+assert_symlink_count "2 symlinks total (1 alpha + 1 beta)" "2" "$TEST_DIR/supabase/supabase/migrations"
 assert "test-beta table created" db_table_exists "test_beta"
 
 # Verify symlinks point to correct worktrees
 ALPHA_COUNT=$(find "$TEST_DIR/supabase/supabase/migrations" -type l -exec readlink {} \; | grep -c "test-alpha" || true)
 BETA_COUNT=$(find "$TEST_DIR/supabase/supabase/migrations" -type l -exec readlink {} \; | grep -c "test-beta" || true)
-assert "2 symlinks point to test-alpha" test "$ALPHA_COUNT" = "2"
+assert "1 symlink points to test-alpha" test "$ALPHA_COUNT" = "1"
 assert "1 symlink points to test-beta" test "$BETA_COUNT" = "1"
 
 # -------------------------------------------------------------------
-header "8: Timestamp conflict detection"
+header "9: Timestamp conflict detection"
 # -------------------------------------------------------------------
 cd "$TEST_DIR/test-beta"
 
@@ -457,31 +496,32 @@ assert_output_contains "reports outdated timestamps" "outdated timestamps" "$OUT
 assert_output_contains "shows fix instruction" "Fix: rebase test-beta" "$OUTPUT"
 assert_file_not_exists "outdated migration NOT symlinked" "$TEST_DIR/supabase/supabase/migrations/app/20250101000001_test_outdated.sql"
 assert_file_exists "valid test-beta migration still intact" "$TEST_DIR/supabase/supabase/migrations/app/20260418000003_test_beta.sql"
-assert_symlink_count "still 3 symlinks (no change)" "3" "$TEST_DIR/supabase/supabase/migrations"
+assert_symlink_count "still 2 symlinks (no change)" "2" "$TEST_DIR/supabase/supabase/migrations"
 
 # Cleanup the outdated file
 rm "$TEST_DIR/test-beta/supabase/migrations/app/20250101000001_test_outdated.sql"
 
 # -------------------------------------------------------------------
-header "9: dev wt down — teardown test-alpha"
+header "10: dev wt down — teardown test-alpha"
 # -------------------------------------------------------------------
 cd "$TEST_DIR/main"
 OUTPUT=$("$SCRIPTS_DIR/dev-worktree-down.sh" test-alpha 2>&1) || true
 
-assert_output_contains "removed 2 symlinks" "Removed 2 symlink" "$OUTPUT"
+assert_output_contains "removed 1 symlink" "Removed 1 symlink" "$OUTPUT"
 assert_output_contains "repairing migration history" "Repairing migration history" "$OUTPUT"
-assert_output_contains "DB rows deleted" "DELETE 2" "$OUTPUT"
-assert_file_not_exists "alpha symlink 1 gone" "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"
+assert_output_contains "DB row deleted" "DELETE 1" "$OUTPUT"
+assert_file_exists "merged migration still a real file" "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"
+assert "merged migration is not a symlink" test ! -L "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"
 assert_file_not_exists "alpha symlink 2 gone" "$TEST_DIR/supabase/supabase/migrations/app/20260418000002_test_alpha_2.sql"
 assert_file_exists "beta symlink still intact" "$TEST_DIR/supabase/supabase/migrations/app/20260418000003_test_beta.sql"
 assert_symlink_count "1 symlink remains" "1" "$TEST_DIR/supabase/supabase/migrations"
-assert "alpha version 1 removed from DB" db_version_not_exists "20260418000001"
+assert "merged alpha version 1 still in DB" db_version_exists "20260418000001"
 assert "alpha version 2 removed from DB" db_version_not_exists "20260418000002"
 assert "beta version still in DB" db_version_exists "20260418000003"
 assert_output_not_contains "no migration errors" "Remote migration versions not found" "$OUTPUT"
 
 # -------------------------------------------------------------------
-header "10: dev wt down — teardown test-beta"
+header "11: dev wt down — teardown test-beta"
 # -------------------------------------------------------------------
 cd "$TEST_DIR/main"
 OUTPUT=$("$SCRIPTS_DIR/dev-worktree-down.sh" test-beta 2>&1) || true
@@ -492,7 +532,7 @@ assert_symlink_count "no symlinks remain" "0" "$TEST_DIR/supabase/supabase/migra
 assert_output_not_contains "no migration errors" "Remote migration versions not found" "$OUTPUT"
 
 # -------------------------------------------------------------------
-header "11: dev sb migrate from main — post-cleanup sanity"
+header "12: dev sb migrate from main — post-cleanup sanity"
 # -------------------------------------------------------------------
 cd "$TEST_DIR/main"
 OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
