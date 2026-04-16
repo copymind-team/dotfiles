@@ -21,6 +21,7 @@ export TEST_DIR TEST_DB_CONTAINER SCRIPTS_DIR RUN_FROM_RUNNER=1
 PATTERN="${1:-}"
 SUPABASE_STARTED=false
 FAILED_TESTS=()
+STATS_FILE=""
 
 # ── Cleanup ──────────────────────────────────────────────────────────
 
@@ -30,6 +31,15 @@ cleanup() {
 
   if [ "$SUPABASE_STARTED" = true ] && [ -d "$TEST_DIR/main" ]; then
     (cd "$TEST_DIR/main" && supabase stop 2>/dev/null) || true
+  fi
+
+  # Aggregate stats before removing TEST_DIR
+  local total_passed=0 total_failed=0
+  if [ -f "${STATS_FILE:-}" ]; then
+    while read -r p f; do
+      total_passed=$((total_passed + p))
+      total_failed=$((total_failed + f))
+    done < "$STATS_FILE"
   fi
 
   if [ -d "$TEST_DIR" ]; then
@@ -44,7 +54,10 @@ cleanup() {
   fi
 
   echo ""
+  printf "${BOLD}Total: ${GREEN}%d passed${RESET}, ${RED}%d failed${RESET}\n" "$total_passed" "$total_failed"
+
   if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
+    echo ""
     printf "${RED}${BOLD}Failed test files:${RESET}\n"
     for f in "${FAILED_TESTS[@]}"; do
       printf "  ${RED}✗${RESET} %s\n" "$f"
@@ -78,6 +91,8 @@ printf "  ${GREEN}✓${RESET} all scripts found\n"
 echo ""
 printf "${DIM}Setting up test repo at %s...${RESET}\n" "$TEST_DIR"
 mkdir -p "$TEST_DIR"
+STATS_FILE="$TEST_DIR/.test-stats"
+export STATS_FILE
 
 INIT_DIR="$TEST_DIR/_init"
 mkdir -p "$INIT_DIR"
@@ -190,6 +205,8 @@ printf "  ${GREEN}✓${RESET} test repo ready\n"
 echo ""
 printf "${DIM}Starting Supabase (this may take a minute on first run)...${RESET}\n"
 cd "$TEST_DIR/main"
+# Stop any leftover containers and delete volumes from a previous run
+supabase stop --no-backup 2>/dev/null || true
 supabase start 2>&1 | tail -5
 SUPABASE_STARTED=true
 printf "  ${GREEN}✓${RESET} Supabase running\n"

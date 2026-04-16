@@ -181,6 +181,10 @@ setup_tmpdir() {
 # ── Summary ───────────────────────────────────────────────────────────
 
 print_results() {
+  # When run from the runner, write stats to a file for aggregation
+  if [ "${RUN_FROM_RUNNER:-}" = "1" ] && [ -n "${STATS_FILE:-}" ]; then
+    echo "$PASSED $FAILED" >> "$STATS_FILE"
+  fi
   echo ""
   printf "${BOLD}Results: ${GREEN}%d passed${RESET}, ${RED}%d failed${RESET}\n" "$PASSED" "$FAILED"
   if [ "$FAILED" -gt 0 ]; then
