@@ -1,61 +1,33 @@
 # Tests
 
-## Structure
+Unified test suite: bare repo + real Supabase container, ordered from pure logic through per-command integration to full migration lifecycle.
 
-```
-tests/
-  helpers.sh              # Shared assert functions and test utilities
-  run-unit.sh             # Unit test runner
-  unit/                   # Unit tests (no Docker/Supabase required)
-    dev.test.sh
-    dev-session.test.sh
-    dev-supabase.test.sh
-    dev-worktree.test.sh
-    dev-worktree-down.test.sh
-    dev-worktree-env.test.sh
-    dev-worktree-info.test.sh
-    dev-worktree-migrate.test.sh
-    dev-worktree-supabase.test.sh
-    dev-worktree-up.test.sh
-  e2e/                    # End-to-end tests (require Docker + Supabase)
-    test-migration-hub.sh
-```
+## Prerequisites
 
-## Running unit tests
+- `git`, `supabase` CLI, `docker`, `jq`
+- Docker daemon running
+
+## Running
 
 ```bash
-./tests/run-unit.sh              # all unit tests
-./tests/run-unit.sh env          # only *env* tests
-./tests/run-unit.sh migrate      # only *migrate* tests
+./tests/run.sh              # all tests
+./tests/run.sh migrate      # only *migrate* tests
+./tests/run.sh unit          # only *unit* tests
 ```
 
-Prerequisites: `git` only. No Docker or Supabase needed.
+Uses test project `test-int` on ports 54421/54422, so it can run alongside a real Supabase instance (54321/54322).
 
-## Running e2e tests
+## Test sequence
 
-```bash
-./tests/e2e/test-migration-hub.sh
-```
-
-Prerequisites: `git`, `supabase` CLI, `docker`, `jq`, Docker daemon running.
-
-No need to stop your existing Supabase — the test uses its own project (`test-mh`) on separate ports (`54421`/`54422`) so both can run simultaneously.
-
-### E2E: migration hub (12 tests)
-
-Self-contained — creates a temporary bare git repo, starts Supabase, runs all 12 tests, and cleans up.
-
-| #   | Test                       | Commands tested       | Key assertion                               |
-| --- | -------------------------- | --------------------- | ------------------------------------------- |
-| 1   | Supabase wt setup          | `dev wt sb`           | Hub created, migrations applied, idempotent |
-| 2   | Create feature wt          | `dev wt up`           | Hub refreshed, no symlinks                  |
-| 3   | Migrate — no new           | `dev sb migrate`      | "No new migrations"                         |
-| 4   | Migrate — new migration    | `dev sb migrate`      | Symlinked + applied to DB                   |
-| 5   | Migrate — idempotent       | `dev sb migrate`      | Skips already-symlinked                     |
-| 6   | Migrate — second migration | `dev sb migrate`      | Only new file symlinked                     |
-| 7   | Merged to main             | `dev sb migrate`      | Symlink replaced by real file from origin   |
-| 8   | Multi-worktree coexistence | `dev wt up` + migrate | Both worktrees' symlinks coexist            |
-| 9   | Timestamp conflict         | `dev sb migrate`      | Rejected with diagnostic, exit 1            |
-| 10  | Teardown first wt          | `dev wt down`         | Only its symlinks removed, DB repaired      |
-| 11  | Teardown second wt         | `dev wt down`         | All symlinks gone, DB clean                 |
-| 12  | Post-cleanup sanity        | `dev sb migrate`      | Hub is clean, no-op                         |
+| #   | File                             | What it tests                                         |
+| --- | -------------------------------- | ----------------------------------------------------- |
+| 01  | `01-unit-logic.test.sh`          | Pure functions: sanitization, port alloc, upsert_env, classify_var, discover_vars, migrate helpers |
+| 02  | `02-routers.test.sh`             | Command dispatch, usage output, non-bare repo checks  |
+| 03  | `03-worktree-supabase.test.sh`   | `dev wt sb` — creates migration hub, idempotent       |
+| 04  | `04-worktree-up.test.sh`         | `dev wt up` — worktree, port, .env, override, supabase integration |
+| 05  | `05-worktree-env.test.sh`        | `dev wt env` — real Supabase var injection             |
+| 06  | `06-worktree-info.test.sh`       | `dev wt info` — registry, worktree listing             |
+| 07  | `07-worktree-up-second.test.sh`  | `dev wt up` — port increment, multi-worktree           |
+| 08  | `08-migrate.test.sh`             | Full migration lifecycle: link, idempotent, multi-wt, timestamp conflict, merge-to-main |
+| 09  | `09-worktree-down.test.sh`       | `dev wt down` — teardown, registry cleanup, DB repair  |
+| 10  | `10-post-cleanup.test.sh`        | Post-cleanup sanity: hub clean, DB consistent          |

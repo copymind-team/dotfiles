@@ -124,6 +124,50 @@ assert_not_symlink() {
   fi
 }
 
+# ── Symlink helpers ───────────────────────────────────────────────────
+
+assert_symlink_count() {
+  local label="$1" expected="$2" dir="$3"
+  local actual
+  actual=$(find "$dir" -type l 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$actual" = "$expected" ]; then
+    PASSED=$((PASSED + 1))
+    printf "  ${GREEN}✓${RESET} %s (count: %s)\n" "$label" "$actual"
+  else
+    FAILED=$((FAILED + 1))
+    printf "  ${RED}✗${RESET} %s — expected %s, got %s\n" "$label" "$expected" "$actual"
+  fi
+}
+
+# ── Database helpers ─────────────────────────────────────────────────
+# Require TEST_DB_CONTAINER to be set (e.g., "supabase_db_test-int")
+
+db_query() {
+  docker exec -e PGPASSWORD=postgres "${TEST_DB_CONTAINER:-supabase_db_test-int}" \
+    psql -U supabase_admin -d postgres -tAc "$1" 2>/dev/null
+}
+
+db_version_exists() {
+  local version="$1"
+  local count
+  count=$(db_query "SELECT count(*) FROM supabase_migrations.schema_migrations WHERE version = '$version';")
+  [ "$count" = "1" ]
+}
+
+db_version_not_exists() {
+  local version="$1"
+  local count
+  count=$(db_query "SELECT count(*) FROM supabase_migrations.schema_migrations WHERE version = '$version';")
+  [ "$count" = "0" ]
+}
+
+db_table_exists() {
+  local table="$1"
+  local count
+  count=$(db_query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$table';")
+  [ "$count" = "1" ]
+}
+
 # ── Temp dir management ───────────────────────────────────────────────
 
 TEST_TMPDIR=""
@@ -144,11 +188,14 @@ print_results() {
   fi
 }
 
-# Auto-cleanup and print results on exit
+# Auto-cleanup and print results on exit.
+# When run from the runner (RUN_FROM_RUNNER=1), skip auto-trap — the runner handles reporting.
 _test_cleanup() {
   if [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ]; then
     rm -rf "$TEST_TMPDIR"
   fi
   print_results
 }
-trap _test_cleanup EXIT
+if [ "${RUN_FROM_RUNNER:-}" != "1" ]; then
+  trap _test_cleanup EXIT
+fi
