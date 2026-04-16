@@ -67,12 +67,8 @@ echo "Removing git worktree..."
 cd "$CURRENT_WORKTREE"
 git worktree remove "$TARGET_DIR" --force
 
-# --- Optionally delete the branch ---
-read -p "Delete local branch '$BRANCH_NAME'? [y/N] " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-  git branch -D "$BRANCH_NAME" 2>/dev/null || echo "Branch already deleted or not found"
-fi
+# --- Delete the branch ---
+git branch -D "$BRANCH_NAME" 2>/dev/null || echo "Branch already deleted or not found"
 
 # --- Remove from port registry ---
 if [ -f "$REGISTRY" ]; then
