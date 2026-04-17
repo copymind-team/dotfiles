@@ -102,63 +102,6 @@ else
   echo "Warning: No .env.local found in $CURRENT_WORKTREE_NAME worktree" >&2
 fi
 
-# --- Supabase integration ---
-if [ -f "$NEW_WORKTREE_DIR/supabase/config.toml" ]; then
-  if ! command -v supabase &>/dev/null; then
-    echo "Warning: supabase CLI not found. Skipping Supabase setup." >&2
-  else
-    echo "Detected Supabase project..."
-    SUPABASE_READY=false
-    if supabase status --output json >/dev/null 2>&1; then
-      echo "Supabase already running (shared instance)."
-      SUPABASE_READY=true
-    else
-      echo "Starting shared Supabase instance..."
-      echo "(First run pulls ~10 Docker images and may take a few minutes)"
-      if (cd "$NEW_WORKTREE_DIR" && supabase start); then
-        SUPABASE_READY=true
-      else
-        echo "Warning: supabase start failed (ports may be in use by another project)." >&2
-        echo "  Check running containers: docker ps --filter name=supabase" >&2
-        echo "  Skipping Supabase env injection and migrations." >&2
-      fi
-    fi
-
-    if [ "$SUPABASE_READY" = true ]; then
-      # Inject Supabase env vars into .env.local.
-      # Pass SUPABASE_STATUS_DIR so env.sh reads status from the worktree
-      # that started Supabase (which may have different ports in config.toml).
-      (cd "$NEW_WORKTREE_DIR" && SUPABASE_STATUS_DIR="$CURRENT_WORKTREE" "$SCRIPT_DIR/dev-worktree-env.sh")
-
-      # Apply pending migrations from this branch.
-      # The new worktree's config.toml may define different Supabase ports than
-      # the shared running instance (started from a different worktree).
-      # Temporarily patch the db port so `supabase migration up --local` connects
-      # to the running instance, then restore the original config.
-      RUNNING_DB_PORT="$(cd "$CURRENT_WORKTREE" && supabase status --output json 2>/dev/null \
-        | sed -n '/^{/,/^}/p' | jq -r '.DB_URL' | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')"
-      if [ -n "$RUNNING_DB_PORT" ]; then
-        WORKTREE_CONFIG="$NEW_WORKTREE_DIR/supabase/config.toml"
-        WORKTREE_DB_PORT="$(sed -n '/^\[db\]/,/^\[/{s/^port = \([0-9]*\)/\1/p;}' "$WORKTREE_CONFIG")"
-        if [ "$WORKTREE_DB_PORT" != "$RUNNING_DB_PORT" ]; then
-          echo "Patching db port $WORKTREE_DB_PORT → $RUNNING_DB_PORT for shared Supabase instance..."
-          sed -i '' "/^\[db\]/,/^\[/s/^port = ${WORKTREE_DB_PORT}/port = ${RUNNING_DB_PORT}/" "$WORKTREE_CONFIG"
-          RESTORE_DB_PORT=true
-        fi
-      fi
-      echo "Applying Supabase migrations..."
-      if [ -x "$NEW_WORKTREE_DIR/scripts/db-migrate-local.sh" ]; then
-        (cd "$NEW_WORKTREE_DIR" && ./scripts/db-migrate-local.sh)
-      else
-        (cd "$NEW_WORKTREE_DIR" && supabase migration up --local)
-      fi
-      if [ "${RESTORE_DB_PORT:-}" = true ]; then
-        (cd "$NEW_WORKTREE_DIR" && git checkout -- supabase/config.toml)
-      fi
-    fi
-  fi
-fi
-
 # --- Generate .env for Docker Compose project name ---
 echo "COMPOSE_PROJECT_NAME=${REPO_NAME}-${SAFE_NAME}" >"$NEW_WORKTREE_DIR/.env"
 echo "Generated .env with COMPOSE_PROJECT_NAME"
@@ -194,6 +137,18 @@ fi
 echo "Building Docker image..."
 docker compose build
 
+# --- Inject Supabase env vars if running ---
+HAS_SUPABASE=false
+SUPABASE_INJECTED=false
+if [ -f "$NEW_WORKTREE_DIR/supabase/config.toml" ] && command -v supabase &>/dev/null; then
+  HAS_SUPABASE=true
+  if supabase status --output json >/dev/null 2>&1; then
+    echo "Injecting Supabase env vars..."
+    (cd "$NEW_WORKTREE_DIR" && "$SCRIPT_DIR/dev-worktree-env.sh")
+    SUPABASE_INJECTED=true
+  fi
+fi
+
 echo ""
 echo "=== Setup complete ==="
 echo "  Worktree:  $NEW_WORKTREE_DIR"
@@ -202,5 +157,9 @@ echo "  Port:      $NEW_PORT"
 echo "  Container: ${REPO_NAME}-${SAFE_NAME}"
 echo ""
 echo "To get started:"
-echo "  cd $NEW_WORKTREE_DIR"
+echo "  dev s $NEW_WORKTREE_DIR"
+if [ "$HAS_SUPABASE" = true ] && [ "$SUPABASE_INJECTED" = false ]; then
+  echo "  dev sb up              # start Supabase (if not running)"
+  echo "  dev wt env             # pick up Supabase keys into .env.local"
+fi
 echo "  docker compose up"
