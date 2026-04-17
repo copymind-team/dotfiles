@@ -17,7 +17,7 @@ Three-layer test suite against a real bare repo + Supabase container.
 ./test.sh link               # pattern filter across all layers
 ```
 
-Uses test project `test-int` on ports 54421/54422.
+Uses test project `test-int` on ports 54621/54622 (follows `+100` per-project pattern: `54321`=app, `54421`=admin, `54521`=marketing, `54621`=dotfiles test).
 
 ## Layers
 

@@ -114,13 +114,13 @@ project_id = "test-int"
 
 [api]
 enabled = true
-port = 54421
+port = 54621
 schemas = ["public"]
 extra_search_path = ["public"]
 
 [db]
-port = 54422
-shadow_port = 54420
+port = 54622
+shadow_port = 54620
 major_version = 17
 
 [db.pooler]
@@ -161,7 +161,7 @@ cleanup() {
   mv "${MIGRATIONS_DIR}_split" "$MIGRATIONS_DIR"
 }
 trap cleanup EXIT
-supabase migration up --db-url "postgresql://supabase_admin:postgres@127.0.0.1:54422/postgres"
+supabase migration up --db-url "postgresql://supabase_admin:postgres@127.0.0.1:54622/postgres"
 SCRIPT
 chmod +x scripts/db-migrate-local.sh
 
