@@ -1,6 +1,6 @@
 # dotfiles
 
-Team configuration files for nvim, tmux, ghostty, zsh.
+Team configuration files for local development.
 
 ## What's included
 
