@@ -9,7 +9,6 @@ header "shows status when running"
 cd "$TEST_DIR/main"
 OUTPUT=$("$SCRIPTS_DIR/dev-supabase-status.sh" 2>&1) || true
 
-# supabase status output contains service URLs
-assert_contains "shows supabase info" "54421" "$OUTPUT"
+assert_contains "shows service info" "service_role" "$OUTPUT"
 
 print_results

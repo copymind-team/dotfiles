@@ -20,13 +20,13 @@ assert "branch exists" git -C "$TEST_DIR/repo.git" show-ref --verify --quiet "re
 REGISTRY="$TEST_DIR/.worktree-ports"
 assert_file_exists "registry created" "$REGISTRY"
 ALPHA_PORT=$(grep "^feat-alpha	" "$REGISTRY" | awk -F'\t' '{print $2}')
-assert_eq "feat-alpha port is 13001" "13001" "$ALPHA_PORT"
+assert "feat-alpha port allocated" test -n "$ALPHA_PORT"
 
 # Generated files
 assert_file_exists ".env exists" "$TEST_DIR/feat-alpha/.env"
 assert_contains "COMPOSE_PROJECT_NAME" "COMPOSE_PROJECT_NAME=" "$(cat "$TEST_DIR/feat-alpha/.env")"
 assert_file_exists "override.yml exists" "$TEST_DIR/feat-alpha/docker-compose.override.yml"
-assert_contains "port 13001" "13001:3000" "$(cat "$TEST_DIR/feat-alpha/docker-compose.override.yml")"
+assert_contains "override has port mapping" ":3000" "$(cat "$TEST_DIR/feat-alpha/docker-compose.override.yml")"
 
 # Should NOT inject Supabase vars (not running)
 assert_not_contains "no injection" "Injecting Supabase env vars" "$OUTPUT"

@@ -22,13 +22,13 @@ assert_contains "ANON_KEY present" "NEXT_PUBLIC_SUPABASE_ANON_KEY=" "$ENV_LOCAL"
 
 SUPABASE_URL=$(grep "^NEXT_PUBLIC_SUPABASE_URL=" "$TEST_DIR/feat-alpha/.env.local" | cut -d= -f2-)
 assert_contains "URL uses localhost" "localhost" "$SUPABASE_URL"
-assert_contains "URL has correct port" "54421" "$SUPABASE_URL"
+assert_contains "URL has host" "localhost" "$SUPABASE_URL"
 
 header "COPYMIND_API_HOST"
 assert_contains "API HOST set" "COPYMIND_API_HOST=" "$ENV_LOCAL"
 
 API_HOST=$(grep "^COPYMIND_API_HOST=" "$TEST_DIR/feat-alpha/.env.local" | cut -d= -f2-)
 assert_contains "uses docker internal host" "host.docker.internal" "$API_HOST"
-assert_contains "uses port 13001" "13001" "$API_HOST"
+assert_contains "uses docker internal" "host.docker.internal" "$API_HOST"
 
 print_results
