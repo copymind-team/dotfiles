@@ -23,7 +23,7 @@ assert_contains "mentions bare" "bare" "$OUTPUT"
 header "rejects when worktrees already exist"
 setup_tmpdir
 cd "$TEST_TMPDIR"
-git init -q init-repo && cd init-repo
+git init -q -b main init-repo && cd init-repo
 git config user.email "test@test.com" && git config user.name "Test"
 cat > docker-compose.yml << 'YAML'
 services:
@@ -51,7 +51,7 @@ assert_contains "mentions already exists" "already" "$OUTPUT"
 header "creates first worktree from bare repo"
 setup_tmpdir
 cd "$TEST_TMPDIR"
-git init -q init-repo2 && cd init-repo2
+git init -q -b main init-repo2 && cd init-repo2
 git config user.email "test@test.com" && git config user.name "Test"
 cat > docker-compose.yml << 'YAML'
 services:
