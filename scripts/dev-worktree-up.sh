@@ -137,9 +137,16 @@ fi
 echo "Building Docker image..."
 docker compose build
 
+# --- Inject Supabase env vars if running ---
 HAS_SUPABASE=false
-if [ -f "$NEW_WORKTREE_DIR/supabase/config.toml" ]; then
+SUPABASE_INJECTED=false
+if [ -f "$NEW_WORKTREE_DIR/supabase/config.toml" ] && command -v supabase &>/dev/null; then
   HAS_SUPABASE=true
+  if supabase status --output json >/dev/null 2>&1; then
+    echo "Injecting Supabase env vars..."
+    (cd "$NEW_WORKTREE_DIR" && "$SCRIPT_DIR/dev-worktree-env.sh")
+    SUPABASE_INJECTED=true
+  fi
 fi
 
 echo ""
@@ -151,7 +158,7 @@ echo "  Container: ${REPO_NAME}-${SAFE_NAME}"
 echo ""
 echo "To get started:"
 echo "  dev s $NEW_WORKTREE_DIR"
-if [ "$HAS_SUPABASE" = true ]; then
+if [ "$HAS_SUPABASE" = true ] && [ "$SUPABASE_INJECTED" = false ]; then
   echo "  dev sb up              # start Supabase (if not running)"
   echo "  dev wt env             # pick up Supabase keys into .env.local"
 fi

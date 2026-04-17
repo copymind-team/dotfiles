@@ -56,11 +56,15 @@ assert_contains "override has port 13001" "13001:3000" "$OVERRIDE"
 # .env.local copied/created
 assert_file_exists ".env.local exists" "$TEST_DIR/feat-alpha/.env.local"
 
-# ── Supabase hint ─────────────────────────────────────────────────────
+# ── Supabase auto-injection (Supabase is running in test suite) ───────
 
-header "supabase hints in output"
-assert_contains "hints dev s" "dev s" "$OUTPUT"
-assert_contains "hints dev sb up" "dev sb up" "$OUTPUT"
-assert_contains "hints dev wt env" "dev wt env" "$OUTPUT"
+header "supabase env vars auto-injected"
+assert_contains "injecting message" "Injecting Supabase env vars" "$OUTPUT"
+ENV_LOCAL=$(cat "$TEST_DIR/feat-alpha/.env.local")
+assert_contains "SUPABASE_URL injected" "NEXT_PUBLIC_SUPABASE_URL=" "$ENV_LOCAL"
+
+# Hints for sb up / wt env should NOT appear (already injected)
+assert_not_contains "no sb up hint" "dev sb up" "$OUTPUT"
+assert_not_contains "no wt env hint" "dev wt env" "$OUTPUT"
 
 print_results
