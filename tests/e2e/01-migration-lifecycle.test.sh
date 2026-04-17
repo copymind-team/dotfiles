@@ -13,7 +13,7 @@ header "no new migrations initially"
 cd "$TEST_DIR/feat-alpha"
 OUTPUT=$("$SCRIPTS_DIR/dev-supabase-link.sh" 2>&1) || true
 assert_contains "reports no new" "No new migrations in feat-alpha" "$OUTPUT"
-assert_symlink_count "no symlinks in hub" "0" "$TEST_DIR/supabase/supabase/migrations"
+assert_symlink_count "no symlinks in supabase wt" "0" "$TEST_DIR/supabase/supabase/migrations"
 
 header "new migration — symlink + apply"
 cd "$TEST_DIR/feat-alpha"

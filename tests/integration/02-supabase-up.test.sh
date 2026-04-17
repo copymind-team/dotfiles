@@ -9,7 +9,7 @@ header "start supabase"
 cd "$TEST_DIR/main"
 OUTPUT=$("$SCRIPTS_DIR/dev-supabase-up.sh" 2>&1) || true
 
-assert_contains "hub ready" "Supabase hub ready" "$OUTPUT"
+assert_contains "supabase ready" "Supabase ready" "$OUTPUT"
 assert_file_exists "supabase worktree created" "$TEST_DIR/supabase"
 assert_file_exists "has config.toml" "$TEST_DIR/supabase/supabase/config.toml"
 

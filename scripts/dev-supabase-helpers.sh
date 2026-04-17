@@ -201,7 +201,7 @@ symlink_migrations() {
   done <<< "$new_files"
 
   if [ "$count" -gt 0 ]; then
-    echo "Symlinked $count migration(s) into the migration hub"
+    echo "Symlinked $count migration(s) into the supabase worktree"
   fi
 }
 
@@ -226,7 +226,7 @@ remove_wt_symlinks() {
   done
 
   if [ "$count" -gt 0 ]; then
-    echo "Removed $count symlink(s) from the migration hub"
+    echo "Removed $count symlink(s) from the supabase worktree"
   fi
 }
 
@@ -249,7 +249,7 @@ clean_stale_symlinks() {
   done
 
   if [ "$count" -gt 0 ]; then
-    echo "Removed $count stale symlink(s) from the migration hub"
+    echo "Removed $count stale symlink(s) from the supabase worktree"
   fi
 }
 
@@ -270,7 +270,7 @@ clean_all_stale_symlinks() {
   done
 
   if [ "$count" -gt 0 ]; then
-    echo "Removed $count stale symlink(s) from the migration hub"
+    echo "Removed $count stale symlink(s) from the supabase worktree"
   else
     echo "No stale symlinks found"
   fi

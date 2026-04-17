@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Symlink current worktree's new migrations into the hub and apply to DB.
+# Symlink current worktree's new migrations into supabase worktree and apply to DB.
 # Usage: dev sb link
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -17,7 +17,7 @@ fi
 current_wt="$(git rev-parse --show-toplevel)"
 supabase_wt="$(find_supabase_wt)"
 
-# Update hub to latest origin/main
+# Update supabase worktree to latest origin/main
 ensure_fetch_refspec
 echo "Updating supabase worktree to origin/main..."
 git fetch origin

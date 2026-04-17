@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Remove current worktree's symlinks from the hub and repair DB migration history.
+# Remove current worktree's migration symlinks and repair DB history.
 # Usage: dev sb unlink
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

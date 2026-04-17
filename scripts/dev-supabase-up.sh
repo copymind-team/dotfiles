@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Create supabase worktree (migration hub) and start Supabase.
+# Create supabase worktree and start Supabase.
 # Usage: dev sb up
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -42,7 +42,7 @@ echo "Injecting Supabase env vars..."
 (cd "$supabase_wt" && "$SCRIPT_DIR/dev-worktree-env.sh")
 
 echo ""
-echo "=== Supabase hub ready ==="
+echo "=== Supabase ready ==="
 echo "  Worktree: $supabase_wt"
 echo "  Branch:   origin/main (detached)"
 echo ""

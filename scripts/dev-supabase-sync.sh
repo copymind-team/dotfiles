@@ -29,7 +29,7 @@ fi
 
 ensure_fetch_refspec
 
-# Fetch and update hub to origin/main
+# Fetch and update supabase worktree to origin/main
 echo "Fetching origin..."
 git fetch origin
 echo "Updating supabase worktree to origin/main..."
@@ -42,5 +42,5 @@ clean_all_stale_symlinks "$supabase_wt"
 apply_migrations "$supabase_wt"
 
 echo ""
-echo "=== Supabase hub synced ==="
+echo "=== Supabase synced ==="
 echo "  Updated to: origin/main"

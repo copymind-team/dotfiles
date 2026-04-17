@@ -57,9 +57,9 @@ docker image prune -f 2>/dev/null || true
 echo "Pruning build cache..."
 docker builder prune -f 2>/dev/null || true
 
-# --- Clean up migration hub symlinks ---
+# --- Clean up migration symlinks ---
 if [ -f "$TARGET_DIR/supabase/config.toml" ]; then
-  echo "Cleaning up migration hub symlinks..."
+  echo "Cleaning up migration symlinks..."
   source "$SCRIPT_DIR/dev-supabase-helpers.sh"
   unlink_worktree_migrations "$TARGET_DIR" || true
   echo "Note: Shared Supabase instance left running (used by other worktrees)."

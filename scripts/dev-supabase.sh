@@ -38,9 +38,9 @@ case "${1:-}" in
     echo "  up              Create supabase worktree and start Supabase" >&2
     echo "  down [--force]  Stop shared Supabase instance" >&2
     echo "  status          Show Supabase status" >&2
-    echo "  link            Symlink current worktree's migrations into hub" >&2
-    echo "  unlink          Remove current worktree's symlinks from hub" >&2
-    echo "  sync [--reset]  Fetch origin/main, update hub, clean stale symlinks" >&2
+    echo "  link            Symlink current worktree's migrations and apply" >&2
+    echo "  unlink          Remove current worktree's migration symlinks" >&2
+    echo "  sync [--reset]  Fetch origin/main, update supabase worktree, clean stale symlinks" >&2
     exit 1
     ;;
 esac
