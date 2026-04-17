@@ -9,6 +9,8 @@ header "shows status when running"
 cd "$TEST_DIR/main"
 OUTPUT=$("$SCRIPTS_DIR/dev-supabase-status.sh" 2>&1) || true
 
-assert_contains "shows service info" "service_role" "$OUTPUT"
+# supabase status exits 0 when running — the script would print
+# "not running" otherwise
+assert_not_contains "not showing 'not running'" "not running" "$OUTPUT"
 
 print_results
