@@ -150,7 +150,7 @@ echo "  Port:      $NEW_PORT"
 echo "  Container: ${REPO_NAME}-${SAFE_NAME}"
 echo ""
 echo "To get started:"
-echo "  cd $NEW_WORKTREE_DIR"
+echo "  dev s $NEW_WORKTREE_DIR"
 if [ "$HAS_SUPABASE" = true ]; then
   echo "  dev sb up              # start Supabase (if not running)"
   echo "  dev wt env             # pick up Supabase keys into .env.local"

@@ -59,6 +59,7 @@ assert_file_exists ".env.local exists" "$TEST_DIR/feat-alpha/.env.local"
 # ── Supabase hint ─────────────────────────────────────────────────────
 
 header "supabase hints in output"
+assert_contains "hints dev s" "dev s" "$OUTPUT"
 assert_contains "hints dev sb up" "dev sb up" "$OUTPUT"
 assert_contains "hints dev wt env" "dev wt env" "$OUTPUT"
 
