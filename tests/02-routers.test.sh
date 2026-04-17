@@ -41,20 +41,13 @@ OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" 2>&1) || EXIT_CODE=$?
 assert_exit_code "exits with 1" "1" "${EXIT_CODE:-0}"
 assert_contains "shows usage" "Usage: dev supabase" "$OUTPUT"
 
-# ── dev-worktree-migrate.sh ──────────────────────────────────────────
+# ── dev-supabase.sh subcommands ───────────────────────────────────────
 
-header "dev-worktree-migrate.sh — no args"
-OUTPUT=$(bash "$SCRIPTS_DIR/dev-worktree-migrate.sh" 2>&1) || EXIT_CODE=$?
-assert_exit_code "exits with 1" "1" "${EXIT_CODE:-0}"
-assert_contains "shows usage" "Usage:" "$OUTPUT"
-
-header "dev-worktree-migrate.sh — link without path"
-OUTPUT=$(bash "$SCRIPTS_DIR/dev-worktree-migrate.sh" link 2>&1) || EXIT_CODE=$?
-assert_exit_code "exits with 1" "1" "${EXIT_CODE:-0}"
-
-header "dev-worktree-migrate.sh — unlink without path"
-OUTPUT=$(bash "$SCRIPTS_DIR/dev-worktree-migrate.sh" unlink 2>&1) || EXIT_CODE=$?
-assert_exit_code "exits with 1" "1" "${EXIT_CODE:-0}"
+header "dev-supabase.sh — lists all subcommands"
+OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" 2>&1) || EXIT_CODE=$?
+assert_contains "lists link" "link" "$OUTPUT"
+assert_contains "lists unlink" "unlink" "$OUTPUT"
+assert_contains "lists sync" "sync" "$OUTPUT"
 
 # ── Non-bare repo checks ────────────────────────────────────────────
 

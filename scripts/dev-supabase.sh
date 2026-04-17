@@ -19,17 +19,27 @@ case "${1:-}" in
     shift
     exec "$SCRIPT_DIR/dev-supabase-status.sh" "$@"
     ;;
+  link)
+    shift
+    exec "$SCRIPT_DIR/dev-supabase-link.sh" "$@"
+    ;;
+  unlink)
+    shift
+    exec "$SCRIPT_DIR/dev-supabase-unlink.sh" "$@"
+    ;;
   sync)
     shift
     exec "$SCRIPT_DIR/dev-supabase-sync.sh" "$@"
     ;;
   *)
-    echo "Usage: dev supabase <up|down|status|sync>" >&2
+    echo "Usage: dev supabase <up|down|status|link|unlink|sync>" >&2
     echo "" >&2
     echo "Commands:" >&2
     echo "  up              Create supabase worktree and start Supabase" >&2
     echo "  down [--force]  Stop shared Supabase instance" >&2
     echo "  status          Show Supabase status" >&2
+    echo "  link            Symlink current worktree's migrations into hub" >&2
+    echo "  unlink          Remove current worktree's symlinks from hub" >&2
     echo "  sync [--reset]  Fetch origin/main, update hub, clean stale symlinks" >&2
     exit 1
     ;;

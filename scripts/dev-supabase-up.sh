@@ -35,12 +35,7 @@ else
 fi
 
 # Apply origin/main migrations
-echo "Applying origin/main migrations..."
-if [ -x "$supabase_wt/scripts/db-migrate-local.sh" ]; then
-  (cd "$supabase_wt" && ./scripts/db-migrate-local.sh)
-else
-  (cd "$supabase_wt" && supabase migration up --local)
-fi
+apply_migrations "$supabase_wt"
 
 # Inject env vars
 echo "Injecting Supabase env vars..."

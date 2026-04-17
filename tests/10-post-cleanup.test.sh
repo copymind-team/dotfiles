@@ -9,7 +9,7 @@ printf "${BOLD}10 — Post-cleanup sanity${RESET}\n"
 
 header "dev sb migrate from main — post-cleanup"
 cd "$TEST_DIR/main"
-OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
+OUTPUT=$("$SCRIPTS_DIR/dev-supabase-link.sh" 2>&1) || true
 
 assert_contains "no new migrations" "No new migrations in main" "$OUTPUT"
 assert_contains "DB up to date" "up to date" "$OUTPUT"

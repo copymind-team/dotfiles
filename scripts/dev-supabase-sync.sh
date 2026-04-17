@@ -36,15 +36,10 @@ echo "Updating supabase worktree to origin/main..."
 (cd "$supabase_wt" && git checkout -f origin/main) 2>&1 | grep -v "^HEAD is now at" || true
 
 # Clean up stale symlinks from all worktrees
-"$SCRIPT_DIR/dev-worktree-migrate.sh" clean-all "$supabase_wt"
+clean_all_stale_symlinks "$supabase_wt"
 
 # Apply migrations
-echo "Applying migrations..."
-if [ -x "$supabase_wt/scripts/db-migrate-local.sh" ]; then
-  (cd "$supabase_wt" && ./scripts/db-migrate-local.sh)
-else
-  (cd "$supabase_wt" && supabase migration up --local)
-fi
+apply_migrations "$supabase_wt"
 
 echo ""
 echo "=== Supabase hub synced ==="

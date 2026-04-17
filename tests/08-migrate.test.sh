@@ -9,7 +9,7 @@ printf "${BOLD}08 — Migration lifecycle${RESET}\n"
 
 header "no new migrations"
 cd "$TEST_DIR/feat-alpha"
-OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
+OUTPUT=$("$SCRIPTS_DIR/dev-supabase-link.sh" 2>&1) || true
 
 assert_contains "reports no new" "No new migrations in feat-alpha" "$OUTPUT"
 assert_symlink_count "no symlinks in hub" "0" "$TEST_DIR/supabase/supabase/migrations"
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS public.test_alpha (
 );
 SQL
 
-OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
+OUTPUT=$("$SCRIPTS_DIR/dev-supabase-link.sh" 2>&1) || true
 
 assert_contains "found new migrations" "Found new migrations in feat-alpha" "$OUTPUT"
 assert_contains "symlinked 1" "Symlinked 1 migration" "$OUTPUT"
@@ -37,7 +37,7 @@ assert "table created in DB" db_table_exists "test_alpha"
 # ── Idempotent re-run ────────────────────────────────────────────────
 
 header "idempotent re-run"
-OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
+OUTPUT=$("$SCRIPTS_DIR/dev-supabase-link.sh" 2>&1) || true
 
 assert_contains "no new on re-run" "No new migrations in feat-alpha" "$OUTPUT"
 assert_not_contains "no symlinking" "Symlinked" "$OUTPUT"
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS public.test_alpha_2 (
 );
 SQL
 
-OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
+OUTPUT=$("$SCRIPTS_DIR/dev-supabase-link.sh" 2>&1) || true
 
 assert_contains "symlinked only 1" "Symlinked 1 migration" "$OUTPUT"
 assert_symlink "first symlink still exists" "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS public.test_beta (
 );
 SQL
 
-OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
+OUTPUT=$("$SCRIPTS_DIR/dev-supabase-link.sh" 2>&1) || true
 
 assert_contains "symlinked beta" "Symlinked 1 migration" "$OUTPUT"
 assert_symlink_count "3 symlinks total" "3" "$TEST_DIR/supabase/supabase/migrations"
@@ -93,7 +93,7 @@ cat > supabase/migrations/app/20250101000001_test_outdated.sql << 'SQL'
 CREATE TABLE IF NOT EXISTS public.test_outdated (id uuid PRIMARY KEY);
 SQL
 
-OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || EXIT_CODE=$?
+OUTPUT=$("$SCRIPTS_DIR/dev-supabase-link.sh" 2>&1) || EXIT_CODE=$?
 EXIT_CODE=${EXIT_CODE:-0}
 
 assert_exit_code "exits with 1" "1" "$EXIT_CODE"
@@ -119,7 +119,7 @@ git push -q origin main
 assert_symlink "symlink exists before refresh" "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"
 
 cd "$TEST_DIR/feat-alpha"
-OUTPUT=$("$SCRIPTS_DIR/dev-worktree-migrate.sh" apply 2>&1) || true
+OUTPUT=$("$SCRIPTS_DIR/dev-supabase-link.sh" 2>&1) || true
 
 assert "merged migration is a real file" test -f "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"
 assert "merged migration is NOT a symlink" test ! -L "$TEST_DIR/supabase/supabase/migrations/app/20260418000001_test_alpha.sql"

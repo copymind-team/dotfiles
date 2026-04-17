@@ -137,7 +137,7 @@ assert_not_contains "excludes UNRELATED_VAR" "UNRELATED_VAR" "$VARS"
 # ── migrate functions ─────────────────────────────────────────────────
 
 _extract_fn() {
-  awk "/^${1}\\(\\)/{found=1} found{print} found && /^\\}/{exit}" "$SCRIPTS_DIR/dev-worktree-migrate.sh"
+  awk "/^${1}\\(\\)/{found=1} found{print} found && /^\\}/{exit}" "$SCRIPTS_DIR/dev-supabase-helpers.sh"
 }
 eval "$(_extract_fn find_new_migrations)"
 eval "$(_extract_fn get_latest_origin_timestamp)"
