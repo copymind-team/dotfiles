@@ -23,10 +23,10 @@ if [ "$WT_COUNT" -gt 1 ]; then
 fi
 
 # --- Resolve paths ---
+# Worktrees live inside the bare repo dir (alongside git's `worktrees/` admin dir), not as siblings of it.
 BARE_DIR="$(cd "$GIT_COMMON_DIR" && pwd)"
-PARENT_DIR="$(cd "$BARE_DIR/.." && pwd)"
 REPO_NAME="$(basename "$BARE_DIR" | sed 's/\.git$//')"
-WORKTREE_DIR="$PARENT_DIR/main"
+WORKTREE_DIR="$BARE_DIR/main"
 
 if [ -d "$WORKTREE_DIR" ]; then
   echo "Error: Directory $WORKTREE_DIR already exists." >&2
@@ -67,7 +67,7 @@ fi
 
 # --- Initialize port registry ---
 COMPOSE_FILE="$WORKTREE_DIR/docker-compose.yml"
-REGISTRY="$PARENT_DIR/.worktree-ports"
+REGISTRY="$BARE_DIR/.worktree-ports"
 if [ -f "$COMPOSE_FILE" ]; then
   BASE_PORT=$(sed -n 's/.*- *"\([0-9]*\):.*"/\1/p' "$COMPOSE_FILE" | head -1)
 fi

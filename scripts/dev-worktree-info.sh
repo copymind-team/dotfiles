@@ -16,7 +16,7 @@ fi
 WORKTREE_DIR="$(git rev-parse --show-toplevel)"
 WORKTREE_NAME="$(basename "$WORKTREE_DIR")"
 PARENT_DIR="$(cd "$WORKTREE_DIR/.." && pwd)"
-REPO_NAME="$(basename "$PARENT_DIR")"
+REPO_NAME="$(basename "$PARENT_DIR" | sed 's/\.git$//')"
 REGISTRY="$PARENT_DIR/.worktree-ports"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 PROJECT_NAME="${REPO_NAME}-${WORKTREE_NAME}"

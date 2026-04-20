@@ -27,7 +27,7 @@ fi
 # --- Resolve paths from current worktree ---
 CURRENT_WORKTREE="$(git rev-parse --show-toplevel)"
 PARENT_DIR="$(cd "$CURRENT_WORKTREE/.." && pwd)"
-REPO_NAME="$(basename "$PARENT_DIR")"
+REPO_NAME="$(basename "$PARENT_DIR" | sed 's/\.git$//')"
 
 SAFE_NAME="$(echo "$BRANCH_NAME" | tr '/' '-' | tr -cd 'a-zA-Z0-9_.-')"
 TARGET_DIR="$PARENT_DIR/$SAFE_NAME"

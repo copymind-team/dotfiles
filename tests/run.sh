@@ -14,8 +14,9 @@ TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$TESTS_DIR/helpers.sh"
 
 TEST_DIR="/tmp/dotfiles-test-suite-$$"
+WORKTREE_BASE="$TEST_DIR/repo.git"
 TEST_DB_CONTAINER="supabase_db_test-int"
-export TEST_DIR TEST_DB_CONTAINER SCRIPTS_DIR RUN_FROM_RUNNER=1
+export TEST_DIR WORKTREE_BASE TEST_DB_CONTAINER SCRIPTS_DIR RUN_FROM_RUNNER=1
 
 # Parse arguments
 LAYER=""
@@ -39,8 +40,8 @@ cleanup() {
   printf "${DIM}Cleaning up...${RESET}\n"
 
   # Stop Supabase if running
-  if [ -d "$TEST_DIR/main" ]; then
-    (cd "$TEST_DIR/main" && supabase stop --no-backup 2>/dev/null) || true
+  if [ -d "$WORKTREE_BASE/main" ]; then
+    (cd "$WORKTREE_BASE/main" && supabase stop --no-backup 2>/dev/null) || true
   fi
 
   # Aggregate stats before removing TEST_DIR

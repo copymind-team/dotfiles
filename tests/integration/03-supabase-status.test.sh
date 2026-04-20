@@ -6,7 +6,7 @@ echo ""
 printf "${BOLD}#3 — dev sb status${RESET}\n"
 
 header "shows status when running"
-cd "$TEST_DIR/main"
+cd "$WORKTREE_BASE/main"
 OUTPUT=$("$SCRIPTS_DIR/dev-supabase-status.sh" 2>&1) || true
 
 # supabase status exits 0 when running — the script would print
