@@ -401,8 +401,10 @@ CREATE TABLE IF NOT EXISTS supabase_seeds.applied_seeds (
   echo "Seeds complete: $applied applied, $skipped already up to date."
 }
 
-# --- Edge runtime anchoring ---
+# --- Edge runtime helpers ---
 
+# Poll the pgflow ControlPlane endpoint until it responds or times out.
+# Used by dev-supabase-flow.sh after restarting the stack.
 wait_for_control_plane() {
   local port="${1:-54321}"
   local url="http://127.0.0.1:${port}/functions/v1/pgflow"
@@ -421,45 +423,6 @@ wait_for_control_plane() {
     echo -n "."
     sleep 1
   done
-}
-
-# Check whether the edge runtime container is bind-mounting the shared
-# worktree's supabase/flows/. If not (wrong anchor OR container missing while
-# the stack is partially up), restart the stack from the shared worktree.
-ensure_edge_runtime_anchored() {
-  local supabase_wt="$1"
-  local project_id
-  project_id="$(get_project_id "$supabase_wt")"
-  if [ -z "$project_id" ]; then
-    echo "Error: could not read project_id from $supabase_wt/supabase/config.toml" >&2
-    return 1
-  fi
-  local edge_container="supabase_edge_runtime_${project_id}"
-  local expected_mount="$supabase_wt/supabase/flows"
-  local api_port
-  api_port="$(awk '/^\[api\]/{f=1;next}/^\[/{f=0}f&&/^port[[:space:]]*=/{gsub(/[^0-9]/,"");print;exit}' "$supabase_wt/supabase/config.toml")"
-  [ -z "$api_port" ] && api_port=54321
-
-  local needs_restart=false
-  if docker inspect "$edge_container" >/dev/null 2>&1; then
-    if ! docker inspect "$edge_container" --format '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' 2>/dev/null | grep -qF "$expected_mount"; then
-      echo "Edge runtime anchored to a different worktree — re-anchoring to $supabase_wt..."
-      needs_restart=true
-    fi
-  else
-    echo "Edge runtime container not found — starting stack from $supabase_wt..."
-    needs_restart=true
-  fi
-
-  if [ "$needs_restart" = true ]; then
-    (cd "$supabase_wt" && supabase stop >/dev/null 2>&1) || true
-    (cd "$supabase_wt" && supabase start >/dev/null) || {
-      echo "Error: failed to start Supabase from $supabase_wt" >&2
-      return 1
-    }
-    wait_for_control_plane "$api_port" || return 1
-  fi
-  return 0
 }
 
 # --- Migration application wrapper ---

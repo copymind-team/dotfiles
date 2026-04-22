@@ -10,8 +10,10 @@ set -euo pipefail
 #   dev sb flow <slug>       # compile a specific flow
 #
 # Replaces scripts/db-flow-local.sh. Key differences:
-#   - Anchor-mismatch is self-healing (ensure_edge_runtime_anchored restarts
-#     the stack from the shared worktree when needed).
+#   - No strict edge-runtime anchor pre-check: the script rsyncs flows into
+#     the shared worktree and then `supabase stop && supabase start` from the
+#     shared worktree — which implicitly re-anchors the edge-runtime container
+#     if it was previously started from a different worktree.
 #   - Flow source is ALWAYS synced from the invoking worktree into the shared
 #     worktree before compile, even when invoked from the shared worktree
 #     (the previous script short-circuited in that case).
@@ -83,9 +85,6 @@ to_snake_case() {
 to_kebab_case() {
   echo "$1" | sed 's/\([A-Z]\)/-\1/g' | sed 's/^-//' | tr '[:upper:]' '[:lower:]'
 }
-
-# ── Ensure edge runtime is anchored to the shared worktree ───────────
-ensure_edge_runtime_anchored "$SUPABASE_WT"
 
 # ── Sync invoking worktree's flow source into shared worktree ────────
 # Always sync — even when invoking from the shared worktree — so the behaviour

@@ -10,16 +10,19 @@ printf "${BOLD}E2E: dev sb flow lifecycle${RESET}\n"
 #   - feat-gamma worktree exists
 #   - shared supabase worktree has supabase/flows/noop.ts (git-tracked from fixture)
 #
-# Part 1 (anchor self-heal) exercises the bug that motivated the refactor.
-# Part 2 (released-flow guard) exercises the pre-pass validation that prevents
-# rewriting a flow's migration once it's on origin/main.
+# This file tests the released-flow guard — the pre-pass validation that
+# prevents rewriting a flow's migration once it's on origin/main. As a
+# useful side effect, the scenario also confirms that when we stop the
+# stack anchored to a feature worktree and re-start via `dev sb flow`, the
+# edge-runtime mounts end up pointing at the shared worktree again
+# (implicit re-anchoring via the rsync-then-restart pipeline in the
+# script).
 #
 # End-to-end `npx pgflow compile` is NOT tested here: Deno inside the
 # edge-runtime container can't reliably resolve jsr.io / registry.npmjs.org
-# when run under Docker Desktop on macOS without a pre-warmed cache. The
-# compile path is covered by pgflow's own test suite; this file focuses on
-# the orchestration that surrounds it — anchor handling, rsync, restart,
-# and pre-pass guards — which are where this refactor lives.
+# under Docker Desktop on macOS without a pre-warmed cache. The compile
+# path is covered by pgflow's own test suite; this file focuses on the
+# orchestration that surrounds it — rsync, restart, and pre-pass guards.
 
 SHARED_WT="$WORKTREE_BASE/supabase"
 PROJECT_ID="test-int"
@@ -38,54 +41,28 @@ if ! docker inspect "$EDGE_CONTAINER" >/dev/null 2>&1; then
 fi
 
 # ══════════════════════════════════════════════════════════════════════
-# Part 1: anchor self-heal
-# ══════════════════════════════════════════════════════════════════════
-
-header "baseline — anchored correctly after dev sb up"
-assert_docker_mount_contains "edge runtime mounts shared worktree's flows" \
-  "$EDGE_CONTAINER" "$SHARED_WT/supabase/flows"
-
-# We call ensure_edge_runtime_anchored directly (rather than via `dev sb flow`)
-# to isolate the anchor-check from the rest of the compile pipeline.
-_call_ensure_anchored() {
-  local wt="$1"
-  (
-    source "$SCRIPTS_DIR/dev-supabase-helpers.sh"
-    ensure_edge_runtime_anchored "$wt"
-  )
-}
-
-header "no-op when already anchored correctly"
-EXIT_CODE=0
-OUTPUT=$(_call_ensure_anchored "$SHARED_WT" 2>&1) || EXIT_CODE=$?
-assert_exit_code "exits 0" "0" "$EXIT_CODE"
-assert_not_contains "does NOT log re-anchoring" "re-anchoring" "$OUTPUT"
-
-header "induce anchor mismatch — start from feat-gamma"
-(cd "$SHARED_WT" && supabase stop --no-backup >/dev/null 2>&1) || true
-cd "$FEAT_WT"
-supabase start >/dev/null 2>&1
-
-assert_docker_mount_contains "edge runtime now mounts feat-gamma" \
-  "$EDGE_CONTAINER" "$FEAT_WT/supabase/flows"
-assert_docker_mount_not_contains "edge runtime NOT mounting shared" \
-  "$EDGE_CONTAINER" "$SHARED_WT/supabase/flows"
-
-header "ensure_edge_runtime_anchored — auto re-anchor (THE BUG FIX)"
-EXIT_CODE=0
-OUTPUT=$(_call_ensure_anchored "$SHARED_WT" 2>&1) || EXIT_CODE=$?
-assert_exit_code "exits 0" "0" "$EXIT_CODE"
-assert_contains "logs re-anchoring" "re-anchoring" "$OUTPUT"
-assert_docker_mount_contains "edge runtime back on shared worktree" \
-  "$EDGE_CONTAINER" "$SHARED_WT/supabase/flows"
-
-# ══════════════════════════════════════════════════════════════════════
-# Part 2: released-flow guard (pre-pass validation)
+# Released-flow guard — fires in pre-pass after rsync + restart, which
+# implicitly re-anchors the edge runtime to the shared worktree.
 # ══════════════════════════════════════════════════════════════════════
 
 SLUG="mirror"
 MIG_TS="20260501000000"
 MIG_BASENAME="${MIG_TS}_create_${SLUG}_flow.sql"
+
+# ── Induce anchor mismatch by starting stack from feat-gamma ─────────
+# This sets up the "ambient" broken state that the flow script has to
+# recover from. We do NOT assert on the mismatch being healed explicitly
+# — the `supabase stop && supabase start` that runs inside the flow
+# script before compile naturally anchors back to shared, and the final
+# assertion (edge runtime mounts shared) confirms it end-to-end.
+
+header "induce anchor mismatch — start stack from feat-gamma"
+(cd "$SHARED_WT" && supabase stop --no-backup >/dev/null 2>&1) || true
+cd "$FEAT_WT"
+supabase start >/dev/null 2>&1
+
+assert_docker_mount_contains "pre-check: edge runtime mounts feat-gamma" \
+  "$EDGE_CONTAINER" "$FEAT_WT/supabase/flows"
 
 # ── Setup: add flow source + a hand-crafted migration to feat-gamma ──
 # We bypass real pgflow compilation by pre-placing the migration file the
@@ -111,13 +88,10 @@ SELECT pgflow.create_flow('${SLUG}', max_attempts => 3, base_delay => 1);
 SELECT pgflow.add_step('${SLUG}', 'reflect');
 SQL
 
-# Make the source file NEWER than the migration so the mtime-skip branch
-# doesn't short-circuit. The released-flow guard runs only when recompile
-# is needed (source newer than migration).
+# Source must be NEWER than the migration so the mtime-skip branch
+# doesn't short-circuit; the released-flow guard runs only when recompile
+# is needed.
 touch "$FEAT_WT/supabase/flows/mirror.ts"
-
-assert_file_exists "mirror source file" "$FEAT_WT/supabase/flows/mirror.ts"
-assert_file_exists "pre-placed migration" "$FEAT_WT/supabase/migrations/jobs/${MIG_BASENAME}"
 
 # ── Merge the migration to origin/main — flow becomes "released" ─────
 
@@ -134,9 +108,9 @@ git add supabase/migrations/jobs/"${MIG_BASENAME}" supabase/flows/mirror.ts supa
 git commit -q -m "release mirror flow"
 git push -q origin main
 
-# ── dev sb flow mirror from feat-gamma — guard fires ────────────────
+# ── dev sb flow mirror from feat-gamma — guard fires, anchor restored ─
 
-header "dev sb flow mirror from feat-gamma — released-flow guard fires"
+header "dev sb flow mirror from feat-gamma — guard fires + implicit re-anchor"
 cd "$FEAT_WT"
 EXIT_CODE=0
 OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" flow "$SLUG" 2>&1) || EXIT_CODE=$?
@@ -150,6 +124,14 @@ assert_contains "points at versioning guide" "version-flows" "$OUTPUT"
 # Shared wt flows must be restored after the guard-triggered abort
 assert_file_exists "shared wt still has noop.ts" "$SHARED_WT/supabase/flows/noop.ts"
 assert_file_not_exists "shared wt has no mirror.ts (trap restored)" "$SHARED_WT/supabase/flows/mirror.ts"
+
+# Implicit re-anchor: even though we started the stack from feat-gamma,
+# the script's rsync + restart-from-shared pipeline left the edge runtime
+# anchored back to the shared worktree.
+assert_docker_mount_contains "edge runtime implicitly re-anchored to shared" \
+  "$EDGE_CONTAINER" "$SHARED_WT/supabase/flows"
+assert_docker_mount_not_contains "edge runtime no longer mounting feat-gamma" \
+  "$EDGE_CONTAINER" "$FEAT_WT/supabase/flows"
 
 # ── Return to main for later cleanup ─────────────────────────────────
 

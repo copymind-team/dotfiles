@@ -26,13 +26,12 @@ Uses test project `test-int` on ports 54621/54622 (follows `+100` per-project pa
 
 Pure functions and routers — no Supabase, no worktree state needed.
 
-| File                      | What it tests                                                              |
-| ------------------------- | -------------------------------------------------------------------------- |
-| `01-pure-functions`       | Sanitization, port alloc, upsert_env, classify_var, migration helpers      |
-| `02-routers`              | Command dispatch, usage output, non-bare repo checks, missing args         |
-| `12-do-migrate-up`        | Flatten/restore, db-port parsing, failure trap (stubbed `supabase`)        |
-| `13-do-seed-up`           | Seed registry, users.sql skip, idempotence, rename-as-new (stubbed `psql`) |
-| `14-ensure-edge-anchored` | Anchor detection + restart logic (stubbed `docker`/`supabase`)             |
+| File                | What it tests                                                              |
+| ------------------- | -------------------------------------------------------------------------- |
+| `01-pure-functions` | Sanitization, port alloc, upsert_env, classify_var, migration helpers      |
+| `02-routers`        | Command dispatch, usage output, non-bare repo checks, missing args         |
+| `12-do-migrate-up`  | Flatten/restore, db-port parsing, failure trap (stubbed `supabase`)        |
+| `13-do-seed-up`     | Seed registry, users.sql skip, idempotence, rename-as-new (stubbed `psql`) |
 
 ### Integration (`tests/integration/`)
 
@@ -56,4 +55,4 @@ Multi-command developer workflows.
 | `01-migration-lifecycle` | link → idempotent → multi-wt → timestamp conflict → unlink → merge-to-main → teardown → cleanup    |
 | `02-db-migrate-seed`     | `dev sb migrate` + `dev sb seed` — no-op, new file, idempotence, users.sql skip, rename-as-new     |
 | `03-db-reset`            | `dev sb reset` — wipe + re-migrate + re-seed, functions serve backgrounded, feature-worktree scope |
-| `04-db-flow-lifecycle`   | anchor self-heal + `dev sb flow` pipeline: new flow, idempotent re-run, released-flow guard        |
+| `04-db-flow-lifecycle`   | `dev sb flow` released-flow guard fires (and implicitly re-anchors edge runtime via restart)       |

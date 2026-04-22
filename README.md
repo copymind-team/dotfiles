@@ -70,18 +70,18 @@ Unified entry point for development tools.
 
 All commands operate on the shared supabase worktree regardless of which worktree you invoke them from.
 
-| Command                 | Description                                                                                                                                            |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `dev sb up`             | Create supabase worktree and start Supabase                                                                                                            |
-| `dev sb down [--force]` | Stop shared Supabase instance                                                                                                                          |
-| `dev sb status`         | Show Supabase status                                                                                                                                   |
-| `dev sb link`           | Symlink current worktree's migrations and apply                                                                                                        |
-| `dev sb unlink`         | Remove current worktree's migration symlinks                                                                                                           |
-| `dev sb sync [--reset]` | Fetch origin/main, update supabase worktree, clean stale symlinks                                                                                      |
-| `dev sb migrate`        | Apply pending migrations in the shared worktree                                                                                                        |
-| `dev sb seed`           | Apply pending seeds from `supabase/seeds/` (skips `users.sql`; tracked in `supabase_seeds.applied_seeds` — rename a seed to re-apply it)               |
-| `dev sb reset`          | Full local reset: `db reset` → apply migrations → seed `users.sql` → apply seeds → background `functions serve`                                        |
-| `dev sb flow [slug]`    | Compile pgflow flows from the invoking worktree and apply. Auto re-anchors the edge runtime to the shared worktree when it was last started elsewhere. |
+| Command                 | Description                                                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev sb up`             | Create supabase worktree and start Supabase                                                                                              |
+| `dev sb down [--force]` | Stop shared Supabase instance                                                                                                            |
+| `dev sb status`         | Show Supabase status                                                                                                                     |
+| `dev sb link`           | Symlink current worktree's migrations and apply                                                                                          |
+| `dev sb unlink`         | Remove current worktree's migration symlinks                                                                                             |
+| `dev sb sync [--reset]` | Fetch origin/main, update supabase worktree, clean stale symlinks                                                                        |
+| `dev sb migrate`        | Apply pending migrations in the shared worktree                                                                                          |
+| `dev sb seed`           | Apply pending seeds from `supabase/seeds/` (skips `users.sql`; tracked in `supabase_seeds.applied_seeds` — rename a seed to re-apply it) |
+| `dev sb reset`          | Full local reset: `db reset` → apply migrations → seed `users.sql` → apply seeds → background `functions serve`                          |
+| `dev sb flow [slug]`    | Compile pgflow flows from the invoking worktree and apply against the shared stack.                                                      |
 
 ### `dev wt` — Worktree
 
