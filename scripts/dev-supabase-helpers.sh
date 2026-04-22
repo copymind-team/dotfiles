@@ -488,15 +488,16 @@ unlink_worktree_migrations() {
 # Scaffold a pgflow Deno edge-function worker from templates. Idempotent: if
 # the worker directory already exists, returns without touching it.
 #
-# Usage: scaffold_pgflow_worker <invoking_wt> <slug>
+# Usage: scaffold_pgflow_worker <invoking_wt> <supabase_wt> <slug>
 #
 # Expects supabase/flows/<kebab-slug>.ts to exist in the invoking worktree.
 # Templates live under scripts/templates/pgflow-worker/ (next to this file).
-# Pgflow version is read from the invoking worktree's package.json
-# (@pgflow/dsl, @pgflow/edge-worker, or pgflow), falling back to 0.14.1.
+# Pgflow version is pinned to whatever the supabase worktree's ControlPlane
+# function uses (supabase/functions/pgflow/deno.json), falling back to 0.14.1.
 scaffold_pgflow_worker() {
   local invoking_wt="$1"
-  local slug="$2"
+  local supabase_wt="$2"
+  local slug="$3"
 
   local kebab_slug
   kebab_slug=$(echo "$slug" | sed 's/\([A-Z]\)/-\1/g' | sed 's/^-//' | tr '[:upper:]' '[:lower:]')
@@ -506,6 +507,7 @@ scaffold_pgflow_worker() {
   local helpers_dir
   helpers_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local template_dir="$helpers_dir/templates/pgflow-worker"
+  local pgflow_deno="$supabase_wt/supabase/functions/pgflow/deno.json"
 
   if [ -d "$worker_dir" ]; then
     return 0
@@ -527,8 +529,10 @@ scaffold_pgflow_worker() {
     echo "    (note: no 'export const ... = new Flow' found in $(basename "$source_file"); falling back to $flow_export)"
   fi
 
-  local pgflow_version
-  pgflow_version=$(node -e "try{const p=require('$invoking_wt/package.json');const d={...(p.dependencies||{}),...(p.devDependencies||{})};const v=d['@pgflow/dsl']||d['@pgflow/edge-worker']||d['pgflow'];process.stdout.write((v||'').replace(/^[^0-9]*/,''))}catch(e){}" 2>/dev/null)
+  local pgflow_version=""
+  if [ -f "$pgflow_deno" ]; then
+    pgflow_version=$(grep -oE '@pgflow/edge-worker@[^"/]+' "$pgflow_deno" | head -n1 | sed 's|.*@||')
+  fi
   [ -z "$pgflow_version" ] && pgflow_version="0.14.1"
 
   mkdir -p "$worker_dir"
