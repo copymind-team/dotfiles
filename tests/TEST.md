@@ -56,4 +56,4 @@ Multi-command developer workflows.
 | `01-migration-lifecycle` | link → idempotent → multi-wt → timestamp conflict → unlink → merge-to-main → teardown → cleanup    |
 | `02-db-migrate-seed`     | `dev sb migrate` + `dev sb seed` — no-op, new file, idempotence, users.sql skip, rename-as-new     |
 | `03-db-reset`            | `dev sb reset` — wipe + re-migrate + re-seed, functions serve backgrounded, feature-worktree scope |
-| `04-db-flow-lifecycle`   | anchor self-heal + `dev sb flow up` pipeline: new flow, idempotent re-run, released-flow guard     |
+| `04-db-flow-lifecycle`   | anchor self-heal + `dev sb flow` pipeline: new flow, idempotent re-run, released-flow guard        |

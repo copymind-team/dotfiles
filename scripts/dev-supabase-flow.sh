@@ -6,8 +6,8 @@ set -euo pipefail
 # shared supabase stack.
 #
 # Usage:
-#   dev sb flow up              # compile all known flows
-#   dev sb flow up <slug>       # compile a specific flow
+#   dev sb flow              # compile all known flows
+#   dev sb flow <slug>       # compile a specific flow
 #
 # Replaces scripts/db-flow-local.sh. Key differences:
 #   - Anchor-mismatch is self-healing (ensure_edge_runtime_anchored restarts
@@ -22,19 +22,8 @@ source "$SCRIPT_DIR/dev-supabase-helpers.sh"
 require_bare_repo
 
 # ── Parse args ───────────────────────────────────────────────────────
-case "${1:-}" in
-  up) shift ;;
-  "")
-    echo "Usage: dev sb flow up [slug]" >&2
-    exit 1 ;;
-  *)
-    echo "Usage: dev sb flow up [slug]" >&2
-    echo "  (unknown subcommand: $1)" >&2
-    exit 1 ;;
-esac
-
 if [ $# -gt 1 ]; then
-  echo "Usage: dev sb flow up [slug]" >&2
+  echo "Usage: dev sb flow [slug]" >&2
   echo "  (too many arguments)" >&2
   exit 1
 fi
@@ -171,7 +160,7 @@ for SLUG in "${SLUGS[@]}"; do
     echo "    2. Change the slug in the new file (e.g. to '${SLUG}V2')" >&2
     echo "    3. Register it in supabase/flows/index.ts" >&2
     echo "    4. Update callers (UserJobKey + code) to use the new slug" >&2
-    echo "    5. Re-run: dev sb flow up" >&2
+    echo "    5. Re-run: dev sb flow" >&2
     echo "  See https://www.pgflow.dev/build/version-flows/" >&2
     exit 1
   fi

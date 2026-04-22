@@ -22,23 +22,12 @@ assert_contains "lists flow" "flow" "$OUTPUT"
 
 # ── dev sb flow argument validation ──────────────────────────────────
 
-header "dev sb flow without subcommand"
+header "dev sb flow with too many args"
 EXIT_CODE=0
-OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" flow 2>&1) || EXIT_CODE=$?
-assert_exit_code "exits with 1" "1" "$EXIT_CODE"
-assert_contains "shows usage" "Usage: dev sb flow up" "$OUTPUT"
-
-header "dev sb flow with unknown subcommand"
-EXIT_CODE=0
-OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" flow bogus 2>&1) || EXIT_CODE=$?
-assert_exit_code "exits with 1" "1" "$EXIT_CODE"
-assert_contains "flags unknown subcommand" "unknown subcommand" "$OUTPUT"
-
-header "dev sb flow up with too many args"
-EXIT_CODE=0
-OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" flow up foo bar 2>&1) || EXIT_CODE=$?
+OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" flow foo bar 2>&1) || EXIT_CODE=$?
 assert_exit_code "exits with 1" "1" "$EXIT_CODE"
 assert_contains "flags too many args" "too many arguments" "$OUTPUT"
+assert_contains "shows usage" "Usage: dev sb flow" "$OUTPUT"
 
 # ── dev sb seed/migrate operate on shared worktree regardless of cwd ─
 # Non-destructive check: reading usage/bare-repo guards works from anywhere.

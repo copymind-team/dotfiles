@@ -60,7 +60,7 @@ case "${1:-}" in
     echo "  migrate         Apply pending migrations in the shared worktree" >&2
     echo "  seed            Apply pending seeds (skips users.sql)" >&2
     echo "  reset           Full reset: db reset + migrate + seeds + functions serve" >&2
-    echo "  flow up [slug]  Compile + apply pgflow flows from invoking worktree" >&2
+    echo "  flow [slug]     Compile + apply pgflow flows from invoking worktree" >&2
     exit 1
     ;;
 esac

@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS public._test_init (
 );
 SQL
 
-# Minimal noop flow for `dev sb flow up` end-to-end tests. The ControlPlane
+# Minimal noop flow for `dev sb flow` end-to-end tests. The ControlPlane
 # (edge runtime) resolves @pgflow/dsl via Deno's npm resolver, per deno.json.
 cat > supabase/flows/noop.ts << 'TS'
 import { Flow } from "@pgflow/dsl";

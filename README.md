@@ -81,7 +81,7 @@ All commands operate on the shared supabase worktree regardless of which worktre
 | `dev sb migrate`        | Apply pending migrations in the shared worktree                                                                                                        |
 | `dev sb seed`           | Apply pending seeds from `supabase/seeds/` (skips `users.sql`; tracked in `supabase_seeds.applied_seeds` — rename a seed to re-apply it)               |
 | `dev sb reset`          | Full local reset: `db reset` → apply migrations → seed `users.sql` → apply seeds → background `functions serve`                                        |
-| `dev sb flow up [slug]` | Compile pgflow flows from the invoking worktree and apply. Auto re-anchors the edge runtime to the shared worktree when it was last started elsewhere. |
+| `dev sb flow [slug]`    | Compile pgflow flows from the invoking worktree and apply. Auto re-anchors the edge runtime to the shared worktree when it was last started elsewhere. |
 
 ### `dev wt` — Worktree
 

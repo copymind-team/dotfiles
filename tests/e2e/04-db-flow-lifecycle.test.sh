@@ -45,7 +45,7 @@ header "baseline — anchored correctly after dev sb up"
 assert_docker_mount_contains "edge runtime mounts shared worktree's flows" \
   "$EDGE_CONTAINER" "$SHARED_WT/supabase/flows"
 
-# We call ensure_edge_runtime_anchored directly (rather than via `dev sb flow up`)
+# We call ensure_edge_runtime_anchored directly (rather than via `dev sb flow`)
 # to isolate the anchor-check from the rest of the compile pipeline.
 _call_ensure_anchored() {
   local wt="$1"
@@ -134,14 +134,14 @@ git add supabase/migrations/jobs/"${MIG_BASENAME}" supabase/flows/mirror.ts supa
 git commit -q -m "release mirror flow"
 git push -q origin main
 
-# ── dev sb flow up mirror from feat-gamma — guard fires ──────────────
+# ── dev sb flow mirror from feat-gamma — guard fires ────────────────
 
-header "dev sb flow up mirror from feat-gamma — released-flow guard fires"
+header "dev sb flow mirror from feat-gamma — released-flow guard fires"
 cd "$FEAT_WT"
 EXIT_CODE=0
-OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" flow up "$SLUG" 2>&1) || EXIT_CODE=$?
+OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" flow "$SLUG" 2>&1) || EXIT_CODE=$?
 if [ "$EXIT_CODE" != "1" ]; then
-  printf "${DIM}flow up output (expected non-zero):${RESET}\n%s\n" "$OUTPUT" >&2
+  printf "${DIM}flow output (expected non-zero):${RESET}\n%s\n" "$OUTPUT" >&2
 fi
 assert_exit_code "exits 1 (released-flow guard)" "1" "$EXIT_CODE"
 assert_contains "flags released-flow state" "released on origin/main" "$OUTPUT"
