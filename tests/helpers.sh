@@ -208,6 +208,17 @@ assert_docker_mount_not_contains() {
   fi
 }
 
+# ── File mtime helpers ────────────────────────────────────────────────
+
+# Set a file's mtime to a fixed date in the distant past. Use this when a
+# test compares mtimes (e.g., `source -nt migration`) and needs the result to
+# be deterministic on 1-second-resolution filesystems (CI ext4/tmpfs), where
+# two sequential writes can otherwise share the same second and make `-nt`
+# ambiguous. A subsequent `touch` (or fresh file) is then guaranteed newer.
+backdate() {
+  touch -t 202001010000 "$1"
+}
+
 # ── Temp dir management ───────────────────────────────────────────────
 
 TEST_TMPDIR=""

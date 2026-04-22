@@ -88,13 +88,9 @@ SELECT pgflow.create_flow('${SLUG}', max_attempts => 3, base_delay => 1);
 SELECT pgflow.add_step('${SLUG}', 'reflect');
 SQL
 
-# Source must be NEWER than the migration so the mtime-skip branch doesn't
-# short-circuit; the released-flow guard runs only when recompile is needed.
-# Back-date the migration to a fixed epoch so `touch mirror.ts` below is
-# unambiguously newer even on filesystems with 1-second mtime resolution
-# (CI ext4/tmpfs), where both files otherwise share the same second.
-touch -t 202001010000 "$FEAT_WT/supabase/migrations/jobs/${MIG_BASENAME}"
-touch "$FEAT_WT/supabase/flows/mirror.ts"
+# Source must be newer than the migration so the script's mtime-skip branch
+# doesn't short-circuit past the released-flow guard we're here to test.
+backdate "$FEAT_WT/supabase/migrations/jobs/${MIG_BASENAME}"
 
 # ── Merge the migration to origin/main — flow becomes "released" ─────
 
