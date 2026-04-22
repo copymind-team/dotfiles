@@ -39,6 +39,10 @@ cleanup() {
   echo ""
   printf "${DIM}Cleaning up...${RESET}\n"
 
+  # Reap any backgrounded `supabase functions serve` processes started by
+  # `dev sb reset` tests.
+  pkill -f 'supabase functions serve' 2>/dev/null || true
+
   # Stop Supabase if running
   if [ -d "$WORKTREE_BASE/main" ]; then
     (cd "$WORKTREE_BASE/main" && supabase stop --no-backup 2>/dev/null) || true
@@ -87,10 +91,16 @@ printf "${BOLD}Dev CLI — Test Suite${RESET}\n"
 echo ""
 
 printf "${DIM}Checking prerequisites...${RESET}\n"
-for cmd in git supabase docker jq; do
+for cmd in git supabase docker jq psql rsync curl; do
   command -v "$cmd" >/dev/null || { echo "Error: $cmd is required but not found."; exit 1; }
   printf "  ${GREEN}✓${RESET} %s\n" "$cmd"
 done
+# pgflow: required for e2e test 04-db-flow-reanchor. Install: npm install -g pgflow
+if ! command -v pgflow >/dev/null && ! npx -y pgflow --version >/dev/null 2>&1; then
+  echo "Error: pgflow is required but not found. Install via: npm install -g pgflow"
+  exit 1
+fi
+printf "  ${GREEN}✓${RESET} pgflow\n"
 printf "  ${GREEN}✓${RESET} all scripts found\n"
 
 # ── Setup bare repo fixture ─────────────────────────────────────────
@@ -108,7 +118,7 @@ git init -q -b main
 git config user.email "test@test.com"
 git config user.name "Test"
 
-mkdir -p supabase/migrations/app supabase/migrations/jobs scripts src/lib
+mkdir -p supabase/migrations/app supabase/migrations/jobs supabase/seeds supabase/flows supabase/functions/pgflow src/lib src/types
 
 cat > supabase/config.toml << 'TOML'
 project_id = "test-int"
@@ -127,6 +137,9 @@ major_version = 17
 [db.pooler]
 enabled = false
 
+[db.seed]
+enabled = false
+
 [studio]
 enabled = false
 
@@ -140,37 +153,52 @@ enabled = true
 enabled = true
 
 [edge_runtime]
-enabled = false
+enabled = true
+policy = "oneshot"
 
 [analytics]
 enabled = false
 TOML
-
-cat > scripts/db-migrate-local.sh << 'SCRIPT'
-#!/bin/bash
-set -euo pipefail
-MIGRATIONS_DIR="supabase/migrations"
-TEMP_DIR="${MIGRATIONS_DIR}_flat"
-mkdir -p "$TEMP_DIR"
-for PROJECT_DIR in "$MIGRATIONS_DIR"/*/; do
-  cp "$PROJECT_DIR"*.sql "$TEMP_DIR/" 2>/dev/null || true
-done
-mv "$MIGRATIONS_DIR" "${MIGRATIONS_DIR}_split"
-mv "$TEMP_DIR" "$MIGRATIONS_DIR"
-cleanup() {
-  rm -rf "$MIGRATIONS_DIR"
-  mv "${MIGRATIONS_DIR}_split" "$MIGRATIONS_DIR"
-}
-trap cleanup EXIT
-supabase migration up --db-url "postgresql://supabase_admin:postgres@127.0.0.1:54622/postgres"
-SCRIPT
-chmod +x scripts/db-migrate-local.sh
 
 cat > supabase/migrations/app/20260101000000_init.sql << 'SQL'
 CREATE TABLE IF NOT EXISTS public._test_init (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid()
 );
 SQL
+
+# Minimal noop flow for `dev sb flow up` end-to-end tests. The ControlPlane
+# (edge runtime) resolves @pgflow/dsl via Deno's npm resolver, per deno.json.
+cat > supabase/flows/noop.ts << 'TS'
+import { Flow } from "@pgflow/dsl";
+
+export const Noop = new Flow<{ value: string }>({
+  slug: "noop",
+}).step({ slug: "doNothing" }, (input) => ({ ok: true, value: input.run.value }));
+TS
+
+cat > supabase/flows/index.ts << 'TS'
+export { Noop } from "./noop.ts";
+TS
+
+cat > supabase/functions/pgflow/deno.json << 'JSON'
+{
+  "imports": {
+    "@pgflow/core": "npm:@pgflow/core@0.14.1",
+    "@pgflow/core/": "npm:@pgflow/core@0.14.1/",
+    "@pgflow/dsl": "npm:@pgflow/dsl@0.14.1",
+    "@pgflow/dsl/": "npm:@pgflow/dsl@0.14.1/",
+    "@pgflow/edge-worker": "jsr:@pgflow/edge-worker@0.14.1",
+    "@pgflow/edge-worker/": "jsr:@pgflow/edge-worker@0.14.1/"
+  }
+}
+JSON
+
+cat > supabase/functions/pgflow/index.ts << 'TS'
+import { ControlPlane } from "@pgflow/edge-worker";
+import * as flows from "../../flows/index.ts";
+
+ControlPlane.serve(flows);
+TS
 
 cat > docker-compose.yml << 'YAML'
 services:

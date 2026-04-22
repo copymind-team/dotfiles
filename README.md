@@ -4,15 +4,15 @@ Team configuration files for local development.
 
 ## What's included
 
-| Tool | What it does |
-|------|-------------|
-| [Ghostty](https://ghostty.org/) | GPU-accelerated terminal emulator |
-| [Neovim](https://neovim.io/) | Text editor, used as the primary IDE |
-| [tmux](https://github.com/tmux/tmux) | Terminal multiplexer — split panes, persistent sessions |
-| [Zsh](https://www.zsh.org/) + [Oh My Zsh](https://ohmyz.sh/) | Shell with plugins, themes, and better defaults |
-| [Homebrew](https://brew.sh/) | macOS package manager, installs everything above |
-| [ripgrep](https://github.com/BurntSushi/ripgrep) | Fast recursive code search, used by Neovim's Telescope |
-| [TPM](https://github.com/tmux-plugins/tpm) | Tmux Plugin Manager, auto-installs tmux plugins |
+| Tool                                                         | What it does                                            |
+| ------------------------------------------------------------ | ------------------------------------------------------- |
+| [Ghostty](https://ghostty.org/)                              | GPU-accelerated terminal emulator                       |
+| [Neovim](https://neovim.io/)                                 | Text editor, used as the primary IDE                    |
+| [tmux](https://github.com/tmux/tmux)                         | Terminal multiplexer — split panes, persistent sessions |
+| [Zsh](https://www.zsh.org/) + [Oh My Zsh](https://ohmyz.sh/) | Shell with plugins, themes, and better defaults         |
+| [Homebrew](https://brew.sh/)                                 | macOS package manager, installs everything above        |
+| [ripgrep](https://github.com/BurntSushi/ripgrep)             | Fast recursive code search, used by Neovim's Telescope  |
+| [TPM](https://github.com/tmux-plugins/tpm)                   | Tmux Plugin Manager, auto-installs tmux plugins         |
 
 ## Structure
 
@@ -35,7 +35,11 @@ dotfiles/
 │   ├── dev-supabase-status.sh
 │   ├── dev-supabase-link.sh
 │   ├── dev-supabase-unlink.sh
-│   └── dev-supabase-sync.sh
+│   ├── dev-supabase-sync.sh
+│   ├── dev-supabase-migrate.sh
+│   ├── dev-supabase-seed.sh
+│   ├── dev-supabase-reset.sh
+│   └── dev-supabase-flow.sh
 ├── tests/
 │   ├── unit/                     # Pure function tests
 │   ├── integration/              # Single-command tests
@@ -50,39 +54,45 @@ dotfiles/
 
 Unified entry point for development tools.
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `dev session` | `dev s` | Tmux dev sessions |
-| `dev supabase` | `dev sb` | Shared local Supabase instance |
+| Command        | Alias    | Description                         |
+| -------------- | -------- | ----------------------------------- |
+| `dev session`  | `dev s`  | Tmux dev sessions                   |
+| `dev supabase` | `dev sb` | Shared local Supabase instance      |
 | `dev worktree` | `dev wt` | Git worktrees with Docker isolation |
 
 ### `dev s` — Session
 
-| Command | Description |
-|---------|-------------|
+| Command       | Description                                              |
+| ------------- | -------------------------------------------------------- |
 | `dev s [dir]` | Create a tmux dev session (claude, nvim, docker windows) |
 
 ### `dev sb` — Supabase
 
-| Command | Description |
-|---------|-------------|
-| `dev sb up` | Create supabase worktree and start Supabase |
-| `dev sb down [--force]` | Stop shared Supabase instance |
-| `dev sb status` | Show Supabase status |
-| `dev sb link` | Symlink current worktree's migrations and apply |
-| `dev sb unlink` | Remove current worktree's migration symlinks |
-| `dev sb sync [--reset]` | Fetch origin/main, update supabase worktree, clean stale symlinks |
+All commands operate on the shared supabase worktree regardless of which worktree you invoke them from.
+
+| Command                 | Description                                                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `dev sb up`             | Create supabase worktree and start Supabase                                                                                                            |
+| `dev sb down [--force]` | Stop shared Supabase instance                                                                                                                          |
+| `dev sb status`         | Show Supabase status                                                                                                                                   |
+| `dev sb link`           | Symlink current worktree's migrations and apply                                                                                                        |
+| `dev sb unlink`         | Remove current worktree's migration symlinks                                                                                                           |
+| `dev sb sync [--reset]` | Fetch origin/main, update supabase worktree, clean stale symlinks                                                                                      |
+| `dev sb migrate`        | Apply pending migrations in the shared worktree                                                                                                        |
+| `dev sb seed`           | Apply pending seeds from `supabase/seeds/` (skips `users.sql`; tracked in `supabase_seeds.applied_seeds` — rename a seed to re-apply it)               |
+| `dev sb reset`          | Full local reset: `db reset` → apply migrations → seed `users.sql` → apply seeds → background `functions serve`                                        |
+| `dev sb flow up [slug]` | Compile pgflow flows from the invoking worktree and apply. Auto re-anchors the edge runtime to the shared worktree when it was last started elsewhere. |
 
 ### `dev wt` — Worktree
 
 Must be run from inside a bare-cloned repo. Repo name and paths are detected automatically.
 
-| Command | Description |
-|---------|-------------|
-| `dev wt up <branch>` | Create a git worktree with Docker isolation |
-| `dev wt down <branch>` | Tear down a git worktree and free the port |
-| `dev wt env` | Set up .env.local for current worktree |
-| `dev wt info` | Show info about the current worktree |
+| Command                | Description                                 |
+| ---------------------- | ------------------------------------------- |
+| `dev wt up <branch>`   | Create a git worktree with Docker isolation |
+| `dev wt down <branch>` | Tear down a git worktree and free the port  |
+| `dev wt env`           | Set up .env.local for current worktree      |
+| `dev wt info`          | Show info about the current worktree        |
 
 ## Testing
 
@@ -94,7 +104,7 @@ Must be run from inside a bare-cloned repo. Repo name and paths are detected aut
 ./test.sh link               # pattern filter
 ```
 
-Requires: `git`, `supabase` CLI, `docker`, `jq`.
+Requires: `git`, `supabase` CLI, `docker`, `jq`, `psql`, `rsync`, `curl`, and `pgflow` (install via `npm install -g pgflow` — needed for the flow-lifecycle e2e test).
 
 ## Installation
 
