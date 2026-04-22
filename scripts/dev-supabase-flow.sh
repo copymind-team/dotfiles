@@ -224,6 +224,37 @@ for SLUG in ${TODO_SLUGS[@]+"${TODO_SLUGS[@]}"}; do
     echo "    Added [functions.${WORKER_NAME}] to config.toml"
   fi
 
+  SOURCE_FILE="$INVOKING_FLOWS_DIR/${KEBAB_SLUG}.ts"
+  WORKER_DIR="$INVOKING_WT/supabase/functions/$WORKER_NAME"
+  TEMPLATE_DIR="$SCRIPT_DIR/templates/pgflow-worker"
+  if [ ! -d "$WORKER_DIR" ]; then
+    if [ ! -f "$SOURCE_FILE" ]; then
+      echo "    (warning: $SOURCE_FILE missing — skipping worker scaffold)"
+    elif [ ! -d "$TEMPLATE_DIR" ]; then
+      echo "    (warning: $TEMPLATE_DIR missing — skipping worker scaffold)"
+    else
+      FLOW_EXPORT=$(grep -oE 'export const [A-Z][A-Za-z0-9_]* = new Flow' "$SOURCE_FILE" \
+        | head -n1 | awk '{print $3}')
+      if [ -z "$FLOW_EXPORT" ]; then
+        FLOW_EXPORT="$(echo "$SLUG" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+        echo "    (note: no 'export const ... = new Flow' found in $(basename "$SOURCE_FILE"); falling back to $FLOW_EXPORT)"
+      fi
+
+      PGFLOW_VERSION=$(node -e "try{const p=require('$INVOKING_WT/package.json');const d={...(p.dependencies||{}),...(p.devDependencies||{})};const v=d['@pgflow/dsl']||d['@pgflow/edge-worker']||d['pgflow'];process.stdout.write((v||'').replace(/^[^0-9]*/,''))}catch(e){}" 2>/dev/null)
+      [ -z "$PGFLOW_VERSION" ] && PGFLOW_VERSION="0.14.1"
+
+      mkdir -p "$WORKER_DIR"
+      sed \
+        -e "s|__FLOW_EXPORT__|${FLOW_EXPORT}|g" \
+        -e "s|__KEBAB_SLUG__|${KEBAB_SLUG}|g" \
+        "$TEMPLATE_DIR/index.ts" > "$WORKER_DIR/index.ts"
+      sed \
+        -e "s|__PGFLOW_VERSION__|${PGFLOW_VERSION}|g" \
+        "$TEMPLATE_DIR/deno.json" > "$WORKER_DIR/deno.json"
+      echo "    Created worker scaffold: supabase/functions/${WORKER_NAME}/ (pgflow@${PGFLOW_VERSION})"
+    fi
+  fi
+
   if ! grep -rq "track_worker_function('${WORKER_NAME}')" "$JOBS_DIR"; then
     TIMESTAMP=$(date -u -v+1S +"%Y%m%d%H%M%S" 2>/dev/null || date -u -d "+1 second" +"%Y%m%d%H%M%S")
     REG_FILE="${JOBS_DIR}/${TIMESTAMP}_register_${SNAKE_SLUG}_worker.sql"
