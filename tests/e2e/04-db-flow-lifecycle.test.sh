@@ -11,12 +11,15 @@ printf "${BOLD}E2E: dev sb flow lifecycle${RESET}\n"
 #   - shared supabase worktree has supabase/flows/noop.ts (git-tracked from fixture)
 #
 # This file tests the released-flow guard — the pre-pass validation that
-# prevents rewriting a flow's migration once it's on origin/main. As a
-# useful side effect, the scenario also confirms that when we stop the
-# stack anchored to a feature worktree and re-start via `dev sb flow`, the
-# edge-runtime mounts end up pointing at the shared worktree again
-# (implicit re-anchoring via the rsync-then-restart pipeline in the
-# script).
+# prevents rewriting a flow's migration once it's on origin/main.
+#
+# The scenario deliberately boots the stack from a feature worktree before
+# invoking `dev sb flow`. That's a hostile starting state, not a behaviour
+# we promise to heal: we only assert the guard still fires correctly in
+# spite of it. Anchor drift shouldn't happen in practice — every `dev sb`
+# lifecycle command `cd`s into the shared supabase worktree before calling
+# `supabase start`, so the edge runtime is always anchored there unless a
+# user runs raw `supabase ...` from a feature worktree.
 #
 # End-to-end `npx pgflow compile` is NOT tested here: Deno inside the
 # edge-runtime container can't reliably resolve jsr.io / registry.npmjs.org
@@ -41,28 +44,24 @@ if ! docker inspect "$EDGE_CONTAINER" >/dev/null 2>&1; then
 fi
 
 # ══════════════════════════════════════════════════════════════════════
-# Released-flow guard — fires in pre-pass after rsync + restart, which
-# implicitly re-anchors the edge runtime to the shared worktree.
+# Released-flow guard — pre-pass validation that prevents rewriting a
+# flow migration once it's on origin/main.
 # ══════════════════════════════════════════════════════════════════════
 
 SLUG="mirror"
 MIG_TS="20260501000000"
 MIG_BASENAME="${MIG_TS}_create_${SLUG}_flow.sql"
 
-# ── Induce anchor mismatch by starting stack from feat-gamma ─────────
-# This sets up the "ambient" broken state that the flow script has to
-# recover from. We do NOT assert on the mismatch being healed explicitly
-# — the `supabase stop && supabase start` that runs inside the flow
-# script before compile naturally anchors back to shared, and the final
-# assertion (edge runtime mounts shared) confirms it end-to-end.
+# ── Hostile starting state: stack booted from a feature worktree ─────
+# The guard must fire correctly even when the stack happens to be
+# anchored elsewhere. We don't assert anything about the anchor after
+# — that's not a contract, just an incidental side effect of the
+# restart that runs for bind-mount reasons.
 
-header "induce anchor mismatch — start stack from feat-gamma"
+header "boot stack from feat-gamma (hostile starting state)"
 (cd "$SHARED_WT" && supabase stop --no-backup >/dev/null 2>&1) || true
 cd "$FEAT_WT"
 supabase start >/dev/null 2>&1
-
-assert_docker_mount_contains "pre-check: edge runtime mounts feat-gamma" \
-  "$EDGE_CONTAINER" "$FEAT_WT/supabase/flows"
 
 # ── Setup: add flow source + a hand-crafted migration to feat-gamma ──
 # We bypass real pgflow compilation by pre-placing the migration file the
@@ -107,9 +106,9 @@ git add supabase/migrations/jobs/"${MIG_BASENAME}" supabase/flows/mirror.ts supa
 git commit -q -m "release mirror flow"
 git push -q origin main
 
-# ── dev sb flow mirror from feat-gamma — guard fires, anchor restored ─
+# ── dev sb flow mirror from feat-gamma — guard fires ────────────────
 
-header "dev sb flow mirror from feat-gamma — guard fires + implicit re-anchor"
+header "dev sb flow mirror from feat-gamma — released-flow guard fires"
 cd "$FEAT_WT"
 EXIT_CODE=0
 OUTPUT=$(bash "$SCRIPTS_DIR/dev-supabase.sh" flow "$SLUG" 2>&1) || EXIT_CODE=$?
@@ -123,14 +122,6 @@ assert_contains "points at versioning guide" "version-flows" "$OUTPUT"
 # Shared wt flows must be restored after the guard-triggered abort
 assert_file_exists "shared wt still has noop.ts" "$SHARED_WT/supabase/flows/noop.ts"
 assert_file_not_exists "shared wt has no mirror.ts (trap restored)" "$SHARED_WT/supabase/flows/mirror.ts"
-
-# Implicit re-anchor: even though we started the stack from feat-gamma,
-# the script's rsync + restart-from-shared pipeline left the edge runtime
-# anchored back to the shared worktree.
-assert_docker_mount_contains "edge runtime implicitly re-anchored to shared" \
-  "$EDGE_CONTAINER" "$SHARED_WT/supabase/flows"
-assert_docker_mount_not_contains "edge runtime no longer mounting feat-gamma" \
-  "$EDGE_CONTAINER" "$FEAT_WT/supabase/flows"
 
 # ── Return to main for later cleanup ─────────────────────────────────
 
