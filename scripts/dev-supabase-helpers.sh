@@ -484,3 +484,60 @@ unlink_worktree_migrations() {
     apply_migrations "$supabase_wt"
   fi
 }
+
+# Scaffold a pgflow Deno edge-function worker from templates. Idempotent: if
+# the worker directory already exists, returns without touching it.
+#
+# Usage: scaffold_pgflow_worker <invoking_wt> <slug>
+#
+# Expects supabase/flows/<kebab-slug>.ts to exist in the invoking worktree.
+# Templates live under scripts/templates/pgflow-worker/ (next to this file).
+# Pgflow version is read from the invoking worktree's package.json
+# (@pgflow/dsl, @pgflow/edge-worker, or pgflow), falling back to 0.14.1.
+scaffold_pgflow_worker() {
+  local invoking_wt="$1"
+  local slug="$2"
+
+  local kebab_slug
+  kebab_slug=$(echo "$slug" | sed 's/\([A-Z]\)/-\1/g' | sed 's/^-//' | tr '[:upper:]' '[:lower:]')
+  local worker_name="${kebab_slug}-worker"
+  local source_file="$invoking_wt/supabase/flows/${kebab_slug}.ts"
+  local worker_dir="$invoking_wt/supabase/functions/$worker_name"
+  local helpers_dir
+  helpers_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local template_dir="$helpers_dir/templates/pgflow-worker"
+
+  if [ -d "$worker_dir" ]; then
+    return 0
+  fi
+  if [ ! -f "$source_file" ]; then
+    echo "    (warning: $source_file missing — skipping worker scaffold)"
+    return 0
+  fi
+  if [ ! -d "$template_dir" ]; then
+    echo "    (warning: $template_dir missing — skipping worker scaffold)"
+    return 0
+  fi
+
+  local flow_export
+  flow_export=$(grep -oE 'export const [A-Z][A-Za-z0-9_]* = new Flow' "$source_file" \
+    | head -n1 | awk '{print $3}')
+  if [ -z "$flow_export" ]; then
+    flow_export="$(echo "$slug" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+    echo "    (note: no 'export const ... = new Flow' found in $(basename "$source_file"); falling back to $flow_export)"
+  fi
+
+  local pgflow_version
+  pgflow_version=$(node -e "try{const p=require('$invoking_wt/package.json');const d={...(p.dependencies||{}),...(p.devDependencies||{})};const v=d['@pgflow/dsl']||d['@pgflow/edge-worker']||d['pgflow'];process.stdout.write((v||'').replace(/^[^0-9]*/,''))}catch(e){}" 2>/dev/null)
+  [ -z "$pgflow_version" ] && pgflow_version="0.14.1"
+
+  mkdir -p "$worker_dir"
+  sed \
+    -e "s|__FLOW_EXPORT__|${flow_export}|g" \
+    -e "s|__KEBAB_SLUG__|${kebab_slug}|g" \
+    "$template_dir/index.ts" > "$worker_dir/index.ts"
+  sed \
+    -e "s|__PGFLOW_VERSION__|${pgflow_version}|g" \
+    "$template_dir/deno.json" > "$worker_dir/deno.json"
+  echo "    Created worker scaffold: supabase/functions/${worker_name}/ (pgflow@${pgflow_version})"
+}
