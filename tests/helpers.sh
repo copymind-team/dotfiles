@@ -168,6 +168,46 @@ db_table_exists() {
   [ "$count" = "1" ]
 }
 
+db_seed_exists() {
+  local name="$1"
+  local count
+  count=$(db_query "SELECT count(*) FROM supabase_seeds.applied_seeds WHERE name = '$name';")
+  [ "$count" = "1" ]
+}
+
+db_count() {
+  local table="$1"
+  db_query "SELECT count(*) FROM public.\"$table\";"
+}
+
+assert_docker_mount_contains() {
+  local label="$1" container="$2" needle="$3"
+  local mounts
+  mounts=$(docker inspect "$container" --format '{{range .Mounts}}{{.Destination}}
+{{end}}' 2>/dev/null || true)
+  if echo "$mounts" | grep -qF "$needle"; then
+    PASSED=$((PASSED + 1))
+    printf "  ${GREEN}✓${RESET} %s\n" "$label"
+  else
+    FAILED=$((FAILED + 1))
+    printf "  ${RED}✗${RESET} %s — mounts did not contain: '%s'\n" "$label" "$needle"
+  fi
+}
+
+assert_docker_mount_not_contains() {
+  local label="$1" container="$2" needle="$3"
+  local mounts
+  mounts=$(docker inspect "$container" --format '{{range .Mounts}}{{.Destination}}
+{{end}}' 2>/dev/null || true)
+  if echo "$mounts" | grep -qF "$needle"; then
+    FAILED=$((FAILED + 1))
+    printf "  ${RED}✗${RESET} %s — mounts unexpectedly contained: '%s'\n" "$label" "$needle"
+  else
+    PASSED=$((PASSED + 1))
+    printf "  ${GREEN}✓${RESET} %s\n" "$label"
+  fi
+}
+
 # ── Temp dir management ───────────────────────────────────────────────
 
 TEST_TMPDIR=""

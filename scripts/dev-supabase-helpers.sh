@@ -276,14 +276,161 @@ clean_all_stale_symlinks() {
   fi
 }
 
+# --- Config.toml parsers ---
+
+get_project_id() {
+  local supabase_wt="$1"
+  sed -n 's/^project_id = "\(.*\)"/\1/p' "$supabase_wt/supabase/config.toml" | head -n 1
+}
+
+get_db_port() {
+  local supabase_wt="$1"
+  awk '
+    /^\[db\]/ { in_db = 1; next }
+    /^\[/ { in_db = 0 }
+    in_db && /^port[[:space:]]*=/ { gsub(/[^0-9]/, ""); print; exit }
+  ' "$supabase_wt/supabase/config.toml"
+}
+
+edge_runtime_enabled() {
+  local supabase_wt="$1"
+  awk '
+    /^\[edge_runtime\]/ { in_er = 1; next }
+    /^\[/ { in_er = 0 }
+    in_er && /^enabled[[:space:]]*=/ { gsub(/[[:space:]]|"/, ""); sub(/.*=/, ""); print; exit }
+  ' "$supabase_wt/supabase/config.toml"
+}
+
+# --- Migration + seed engines ---
+
+# Flatten supabase/migrations/<subdir>/*.sql into a flat dir, run `supabase
+# migration up`, restore the subdir layout — always, even on failure.
+# Required because the Supabase CLI tracks migrations in one history table
+# and expects a flat migrations directory.
+do_migrate_up() {
+  local supabase_wt="$1"
+  local db_port
+  db_port="$(get_db_port "$supabase_wt")"
+  if [ -z "$db_port" ]; then
+    echo "Error: could not read [db] port from $supabase_wt/supabase/config.toml" >&2
+    return 1
+  fi
+
+  local migrations_dir="$supabase_wt/supabase/migrations"
+  if [ ! -d "$migrations_dir" ]; then
+    echo "No migrations directory — nothing to apply."
+    return 0
+  fi
+
+  # Run the flatten + migrate + restore inside a subshell so the EXIT trap
+  # always fires (covers success, failure, and caller-side errexit).
+  (
+    cd "$supabase_wt"
+    local rel="supabase/migrations"
+    local split="${rel}_split"
+    local flat="${rel}_flat"
+
+    local has_subdirs=false
+    local entry
+    for entry in "$rel"/*/; do
+      [ -d "$entry" ] && { has_subdirs=true; break; }
+    done
+
+    if [ "$has_subdirs" = true ]; then
+      mkdir -p "$flat"
+      local project_dir
+      for project_dir in "$rel"/*/; do
+        cp "$project_dir"*.sql "$flat/" 2>/dev/null || true
+      done
+      mv "$rel" "$split"
+      mv "$flat" "$rel"
+      # shellcheck disable=SC2064
+      trap "rm -rf '$rel'; mv '$split' '$rel'" EXIT
+    fi
+
+    # supabase_admin (superuser) so event triggers can be created.
+    supabase migration up --db-url "postgresql://supabase_admin:postgres@127.0.0.1:${db_port}/postgres"
+  )
+}
+
+# Iterate $supabase_wt/supabase/seeds/*.sql. Maintain a supabase_seeds.applied_seeds
+# table keyed by filename. Skip users.sql (handled by `supabase db reset`).
+do_seed_up() {
+  local supabase_wt="$1"
+  local db_port
+  db_port="$(get_db_port "$supabase_wt")"
+  if [ -z "$db_port" ]; then
+    echo "Error: could not read [db] port from $supabase_wt/supabase/config.toml" >&2
+    return 1
+  fi
+  local db_url="postgresql://postgres:postgres@127.0.0.1:${db_port}/postgres"
+  local seeds_dir="$supabase_wt/supabase/seeds"
+
+  if [ ! -d "$seeds_dir" ]; then
+    echo "No seeds directory — nothing to apply."
+    return 0
+  fi
+
+  psql "$db_url" -q -c "
+CREATE SCHEMA IF NOT EXISTS supabase_seeds;
+CREATE TABLE IF NOT EXISTS supabase_seeds.applied_seeds (
+  name TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+" >/dev/null
+
+  local applied=0 skipped=0
+  local seed_file basename_f already
+  for seed_file in "$seeds_dir"/*.sql; do
+    [ -f "$seed_file" ] || continue
+    basename_f="$(basename "$seed_file")"
+    if [ "$basename_f" = "users.sql" ]; then
+      continue
+    fi
+    already=$(psql -t -A "$db_url" -c "SELECT 1 FROM supabase_seeds.applied_seeds WHERE name = '$basename_f';" 2>/dev/null)
+    if [ "$already" = "1" ]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+    echo "Seeding $basename_f..."
+    psql "$db_url" -q -f "$seed_file"
+    psql "$db_url" -q -c "INSERT INTO supabase_seeds.applied_seeds (name) VALUES ('$basename_f');"
+    applied=$((applied + 1))
+  done
+
+  echo "Seeds complete: $applied applied, $skipped already up to date."
+}
+
+# --- Edge runtime helpers ---
+
+# Poll the pgflow ControlPlane endpoint until it responds or times out.
+# Used by dev-supabase-flow.sh after restarting the stack.
+wait_for_control_plane() {
+  local port="${1:-54321}"
+  local url="http://127.0.0.1:${port}/functions/v1/pgflow"
+  echo -n "Waiting for ControlPlane"
+  local i
+  for i in $(seq 1 30); do
+    if curl -s --max-time 2 "$url" >/dev/null 2>&1; then
+      echo " ready!"
+      return 0
+    fi
+    if [ "$i" -eq 30 ]; then
+      echo " TIMEOUT"
+      echo "Error: ControlPlane did not respond within 30 seconds" >&2
+      return 1
+    fi
+    echo -n "."
+    sleep 1
+  done
+}
+
+# --- Migration application wrapper ---
+
 apply_migrations() {
   local supabase_wt="$1"
   echo "Applying migrations from supabase worktree..."
-  if [ -x "$supabase_wt/scripts/db-migrate-local.sh" ]; then
-    (cd "$supabase_wt" && ./scripts/db-migrate-local.sh)
-  else
-    (cd "$supabase_wt" && supabase migration up --local)
-  fi
+  do_migrate_up "$supabase_wt"
 }
 
 unlink_worktree_migrations() {
