@@ -166,14 +166,19 @@ if ! pgrep -f 'supabase functions serve' >/dev/null 2>&1; then
   (cd "$SHARED_WT" && supabase functions serve) </dev/null >/dev/null 2>&1 &
   disown 2>/dev/null || true
 fi
-# Wait up to 30s for ControlPlane to respond. Skip-loop returns as soon
-# as the endpoint is up so happy-path runs don't pay the full timeout.
+
+# Wait for ControlPlane to be fully loaded. Status-code semantics:
+#   000 — no TCP connection yet (runtime booting)
+#   5xx — Deno is up but still compiling the pgflow function (BOOT_ERROR)
+#   4xx — function loaded, we're just auth-rejected → runtime is READY
+#   2xx — fully ready
+# pgflow compile needs the function loaded, so we only break on 2xx/4xx.
 CP_URL="http://localhost:54621/functions/v1/pgflow"
-for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-  curl -sf -o /dev/null -m 2 "$CP_URL" 2>/dev/null && break
-  # 401/404 from a booted runtime is fine — it means HTTP reached it
-  code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$CP_URL" 2>/dev/null || echo 000)
-  [ "$code" != "000" ] && break
+for _ in $(seq 1 45); do
+  code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$CP_URL" 2>/dev/null || echo 000)
+  case "$code" in
+    2*|4*) break ;;
+  esac
   sleep 2
 done
 
