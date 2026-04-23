@@ -18,6 +18,11 @@ REGISTRY_CONTENT=$(cat "$WORKTREE_BASE/.worktree-ports")
 assert_contains "registry has main entry" "main" "$REGISTRY_CONTENT"
 assert_contains "registry has base port" "13000" "$REGISTRY_CONTENT"
 
+# Override file is generated from the registry, same as sibling worktrees.
+assert_file_exists "main override.yml exists" "$WORKTREE_BASE/main/docker-compose.override.yml"
+OVERRIDE_CONTENT=$(cat "$WORKTREE_BASE/main/docker-compose.override.yml")
+assert_contains "main override maps base port" "13000:3000" "$OVERRIDE_CONTENT"
+
 assert_contains "prints next steps" "dev wt up" "$OUTPUT"
 
 header "rejects re-init when worktree already exists"

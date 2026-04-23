@@ -45,6 +45,7 @@ Single commands tested in dependency order. Each test builds on state from previ
 | 4   | `04-worktree-env`              | `dev wt env` — Supabase var injection, COPYMIND_API_HOST    |
 | 5   | `05-worktree-up-with-supabase` | `dev wt up` when Supabase is running — auto-injects vars    |
 | 6   | `06-supabase-dispatch`         | `dev sb` dispatcher argument validation for new subcommands |
+| 7   | `07-worktree-port`             | `dev wt port` — regenerates override from registry, error paths |
 
 ### E2E (`tests/e2e/`)
 

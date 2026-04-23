@@ -66,6 +66,7 @@ else
 fi
 
 # --- Initialize port registry ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="$WORKTREE_DIR/docker-compose.yml"
 REGISTRY="$BARE_DIR/.worktree-ports"
 if [ -f "$COMPOSE_FILE" ]; then
@@ -75,6 +76,7 @@ if [ -n "${BASE_PORT:-}" ]; then
   printf "# worktree\tport\tcreated\n" >"$REGISTRY"
   printf "%s\t%s\t%s\n" "main" "$BASE_PORT" "$(date +%Y-%m-%d)" >>"$REGISTRY"
   echo "Initialized port registry at $REGISTRY (base port $BASE_PORT)"
+  (cd "$WORKTREE_DIR" && "$SCRIPT_DIR/dev-worktree-port.sh")
 else
   echo "Warning: No host port found in docker-compose.yml — port registry not created." >&2
 fi
