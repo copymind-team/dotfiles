@@ -23,6 +23,34 @@ link() {
   ok "linked $dst -> $src"
 }
 
+# --- Sudo priming ---
+# Two steps in this script need root:
+#
+#   1. Homebrew install (first run only). The Homebrew installer creates
+#      /opt/homebrew (Apple Silicon) or /usr/local (Intel) owned by the
+#      current user, and triggers `xcode-select --install` — both require
+#      sudo. On re-runs, brew is already present and this step is skipped.
+#
+#   2. Appending `127.0.0.1 host.docker.internal` to /etc/hosts. /etc/hosts
+#      is root-owned (mode 644), so `tee -a` must run under sudo. Skipped
+#      if the entry is already present.
+#
+# `brew install <pkg>`, npm global installs into the Homebrew prefix,
+# Oh My Zsh, TPM, and symlinks under $HOME all run as the user — no sudo.
+#
+# We prompt for the password upfront so the rest of the run is unattended,
+# and keep the timestamp alive in the background until this script exits.
+if ! sudo -n true 2>/dev/null; then
+  info "This install needs sudo for Homebrew setup and /etc/hosts — prompting now."
+  sudo -v
+fi
+(
+  while kill -0 "$$" 2>/dev/null; do
+    sudo -n true 2>/dev/null || exit
+    sleep 60
+  done
+) &
+
 # --- Homebrew ---
 if ! command -v brew &>/dev/null; then
   info "Installing Homebrew..."
@@ -82,5 +110,18 @@ else
 fi
 info "Installing tmux plugins..."
 "$HOME/.tmux/plugins/tpm/bin/install_plugins"
+
+# --- /etc/hosts: host.docker.internal ---
+# Docker worktrees write NEXT_PUBLIC_SUPABASE_URL using host.docker.internal
+# so the same URL works from the browser (host) and inside the container.
+# Docker Desktop doesn't reliably add this entry to the host's /etc/hosts,
+# so ensure it exists.
+if grep -qE '^[^#]*[[:space:]]host\.docker\.internal([[:space:]]|$)' /etc/hosts; then
+  ok "/etc/hosts already maps host.docker.internal"
+else
+  info "Adding host.docker.internal to /etc/hosts (requires sudo)..."
+  echo '127.0.0.1 host.docker.internal' | sudo tee -a /etc/hosts >/dev/null
+  ok "Added host.docker.internal -> 127.0.0.1"
+fi
 
 ok "Done!"

@@ -60,6 +60,19 @@ discover_supabase_vars() {
 
 touch "$ENV_FILE"
 
+# Choose how to rewrite the host portion of service URLs before writing them
+# into .env.local. `supabase status` returns 127.0.0.1-based URLs; those are
+# host-reachable from the shell but not from inside a Docker container.
+#
+# Docker worktrees use `host.docker.internal` — install.sh ensures it maps
+# to 127.0.0.1 in /etc/hosts so the same URL also resolves from the host
+# browser. Non-Docker worktrees keep the friendlier `localhost` form.
+if [ -f "$WORKTREE_DIR/Dockerfile" ]; then
+  URL_HOST="host.docker.internal"
+else
+  URL_HOST="localhost"
+fi
+
 # --- Supabase ---
 # SUPABASE_STATUS_DIR overrides where `supabase status` runs.
 # Needed when the current worktree's config.toml has different ports
@@ -74,11 +87,8 @@ if [ -f "$WORKTREE_DIR/supabase/config.toml" ] && command -v supabase &>/dev/nul
     # declared in .env.local, classify each by name, and populate from the
     # running local Supabase. Every worktree on this machine connects to the
     # same shared local instance, so we always overwrite — remote values are
-    # never desired in local dev. URLs get 127.0.0.1 rewritten to localhost so
-    # they resolve both from the browser and inside Docker containers (which
-    # rely on docker-compose's `extra_hosts: localhost:host-gateway` mapping
-    # — see NODE_OPTIONS=--dns-result-order=ipv4first below, which forces
-    # Node to pick the host-mapped IPv4 entry instead of ::1).
+    # never desired in local dev. URLs have 127.0.0.1 rewritten to the host
+    # chosen above so they resolve from whichever context reads them.
     while IFS= read -r var_name; do
       [ -z "$var_name" ] && continue
       status_key="$(classify_supabase_var "$var_name")"
@@ -94,7 +104,7 @@ if [ -f "$WORKTREE_DIR/supabase/config.toml" ] && command -v supabase &>/dev/nul
       fi
 
       case "$status_key" in
-        *_URL) value="$(echo "$raw" | sed 's/127\.0\.0\.1/localhost/')" ;;
+        *_URL) value="$(echo "$raw" | sed "s/127\\.0\\.0\\.1/$URL_HOST/")" ;;
         *)     value="$raw" ;;
       esac
 
@@ -102,24 +112,13 @@ if [ -f "$WORKTREE_DIR/supabase/config.toml" ] && command -v supabase &>/dev/nul
       echo "  + $var_name <- .${status_key}"
     done < <(discover_supabase_vars "$WORKTREE_DIR" "$ENV_FILE")
 
-    echo "Updated $ENV_FILE with Supabase connection details."
+    echo "Updated $ENV_FILE with Supabase connection details (host: $URL_HOST)."
   else
     echo "Warning: Supabase project detected but not running. Skipping env injection." >&2
     echo "  To start: dev supabase up" >&2
   fi
 else
   echo "No Supabase project detected, skipping."
-fi
-
-# --- Node IPv4-first for Docker worktrees ---
-# When the worktree runs in a container (has a Dockerfile) and the compose
-# file uses `extra_hosts: localhost:host-gateway` to map `localhost` to the
-# host, we need Node's DNS to prefer IPv4 — otherwise `localhost` resolves
-# to IPv6 `::1` (the container itself) and fails to reach host-side Supabase.
-# The browser on the host is unaffected; it always uses IPv4 127.0.0.1.
-if [ -f "$WORKTREE_DIR/Dockerfile" ]; then
-  upsert_env "$ENV_FILE" "NODE_OPTIONS" "--dns-result-order=ipv4first"
-  echo "Set NODE_OPTIONS=--dns-result-order=ipv4first (Docker worktree)"
 fi
 
 # --- COPYMIND_API_HOST for Supabase Edge Functions ---
