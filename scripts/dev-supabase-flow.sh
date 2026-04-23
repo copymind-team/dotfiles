@@ -89,29 +89,47 @@ to_kebab_case() {
 # ── Sync invoking worktree's flow source into shared worktree ────────
 # Always sync — even when invoking from the shared worktree — so the behaviour
 # is uniform: compile consumes the invoking worktree's source.
+#
+# The edge-runtime worker imports the flow TS file directly, and the flow
+# imports UserJobKey from src/types/job-key.ts. Both must live under the
+# shared worktree at runtime — on failure we roll back to origin/main state,
+# but on success we leave them in place so the edge runtime can actually run
+# the flow. The scaffolded Deno worker dir is rsynced later (after compile).
 SHARED_JOB_KEY="$SUPABASE_WT/src/types/job-key.ts"
 LOCAL_JOB_KEY="$INVOKING_WT/src/types/job-key.ts"
+INVOKING_FUNCTIONS_DIR="$INVOKING_WT/supabase/functions"
+SHARED_FUNCTIONS_DIR="$SUPABASE_WT/supabase/functions"
 
 SHARED_FLOWS_BACKUP=$(mktemp -d)
-echo "==> Backing up shared worktree's flows to $SHARED_FLOWS_BACKUP"
-cp -a "$SHARED_FLOWS_DIR" "$SHARED_FLOWS_BACKUP/"
+echo "==> Backing up shared worktree's flows + functions to $SHARED_FLOWS_BACKUP"
+cp -a "$SHARED_FLOWS_DIR" "$SHARED_FLOWS_BACKUP/flows"
+if [ -d "$SHARED_FUNCTIONS_DIR" ]; then
+  cp -a "$SHARED_FUNCTIONS_DIR" "$SHARED_FLOWS_BACKUP/functions"
+fi
 if [ -f "$SHARED_JOB_KEY" ]; then
   cp -a "$SHARED_JOB_KEY" "$SHARED_FLOWS_BACKUP/job-key.ts"
 fi
 
-restore_shared_flows() {
-  echo ""
-  echo "==> Restoring shared worktree's flows"
-  rm -rf "$SHARED_FLOWS_DIR"
-  mv "$SHARED_FLOWS_BACKUP/flows" "$SHARED_FLOWS_DIR"
-  if [ -f "$SHARED_FLOWS_BACKUP/job-key.ts" ]; then
-    mv "$SHARED_FLOWS_BACKUP/job-key.ts" "$SHARED_JOB_KEY"
+SCRIPT_FAILED=true
+on_flow_exit() {
+  if [ "$SCRIPT_FAILED" = "true" ]; then
+    echo "" >&2
+    echo "==> Restoring shared worktree's flows + functions + job-key.ts (script failed)" >&2
+    rm -rf "$SHARED_FLOWS_DIR"
+    mv "$SHARED_FLOWS_BACKUP/flows" "$SHARED_FLOWS_DIR" 2>/dev/null || true
+    if [ -d "$SHARED_FLOWS_BACKUP/functions" ]; then
+      rm -rf "$SHARED_FUNCTIONS_DIR"
+      mv "$SHARED_FLOWS_BACKUP/functions" "$SHARED_FUNCTIONS_DIR" 2>/dev/null || true
+    fi
+    if [ -f "$SHARED_FLOWS_BACKUP/job-key.ts" ]; then
+      mv "$SHARED_FLOWS_BACKUP/job-key.ts" "$SHARED_JOB_KEY"
+    fi
+    echo "==> Restarting supabase stack to re-read restored flows" >&2
+    (cd "$SUPABASE_WT" && supabase stop >/dev/null 2>&1 && supabase start >/dev/null 2>&1) || true
   fi
   rm -rf "$SHARED_FLOWS_BACKUP"
-  echo "==> Restarting supabase stack to re-read restored flows"
-  (cd "$SUPABASE_WT" && supabase stop >/dev/null 2>&1 && supabase start >/dev/null 2>&1) || true
 }
-trap restore_shared_flows EXIT
+trap on_flow_exit EXIT
 
 echo "==> Syncing flow source from invoking worktree into shared worktree"
 rsync -a --delete "$INVOKING_FLOWS_DIR/" "$SHARED_FLOWS_DIR/"
@@ -119,12 +137,6 @@ if [ -f "$LOCAL_JOB_KEY" ]; then
   mkdir -p "$(dirname "$SHARED_JOB_KEY")"
   cp -a "$LOCAL_JOB_KEY" "$SHARED_JOB_KEY"
 fi
-
-# Recreate the edge runtime so per-file bind mounts pick up new files.
-echo "==> Restarting supabase stack from shared worktree (picks up new + changed flow files)"
-API_PORT="$(awk '/^\[api\]/{f=1;next}/^\[/{f=0}f&&/^port[[:space:]]*=/{gsub(/[^0-9]/,"");print;exit}' "$SUPABASE_WT/supabase/config.toml")"
-[ -z "$API_PORT" ] && API_PORT=54321
-supabase_stack_restart_ready "$SUPABASE_WT" "$API_PORT"
 
 # ── Pre-pass: validate each slug, decide what needs recompile ────────
 TODO_SLUGS=()
@@ -237,6 +249,22 @@ SQL
 done
 
 if [ "$COMPILED_ANY" = true ]; then
+  # Scaffold writes worker dirs into the invoking worktree only. Rsync them
+  # into the shared worktree so `supabase functions serve` (which runs from
+  # the shared worktree) can enumerate + boot the new workers.
+  echo ""
+  echo "==> Syncing scaffolded worker(s) to shared worktree"
+  if [ -d "$INVOKING_FUNCTIONS_DIR" ]; then
+    rsync -a --delete "$INVOKING_FUNCTIONS_DIR/" "$SHARED_FUNCTIONS_DIR/"
+  fi
+
+  # Recreate the supabase stack so per-file bind mounts + the edge runtime's
+  # function enumeration pick up the new flow TS + worker dirs in one shot.
+  echo "==> Restarting supabase stack (picks up new flow + worker files)"
+  API_PORT="$(awk '/^\[api\]/{f=1;next}/^\[/{f=0}f&&/^port[[:space:]]*=/{gsub(/[^0-9]/,"");print;exit}' "$SUPABASE_WT/supabase/config.toml")"
+  [ -z "$API_PORT" ] && API_PORT=54321
+  supabase_stack_restart_ready "$SUPABASE_WT" "$API_PORT"
+
   echo ""
   echo "==> Applying migrations..."
   # Apply against the invoking worktree's migrations dir — dev sb link already
@@ -253,6 +281,10 @@ else
   echo ""
   echo "==> Nothing to apply — all flows up to date."
 fi
+
+# Mark success so the EXIT trap skips the restore (keeps synced flows + funcs
+# + job-key.ts in the shared worktree so the edge runtime can run the flow).
+SCRIPT_FAILED=false
 
 echo ""
 echo "==> Done!"

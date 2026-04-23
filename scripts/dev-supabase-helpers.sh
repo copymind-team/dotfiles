@@ -300,15 +300,6 @@ get_db_port() {
   ' "$supabase_wt/supabase/config.toml"
 }
 
-edge_runtime_enabled() {
-  local supabase_wt="$1"
-  awk '
-    /^\[edge_runtime\]/ { in_er = 1; next }
-    /^\[/ { in_er = 0 }
-    in_er && /^enabled[[:space:]]*=/ { gsub(/[[:space:]]|"/, ""); sub(/.*=/, ""); print; exit }
-  ' "$supabase_wt/supabase/config.toml"
-}
-
 # --- Migration + seed engines ---
 
 # Flatten supabase/migrations/<subdir>/*.sql into a flat dir, run `supabase

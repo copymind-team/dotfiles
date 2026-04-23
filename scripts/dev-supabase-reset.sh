@@ -37,20 +37,16 @@ echo ""
 echo "==> Seeding data..."
 do_seed_up "$supabase_wt"
 
-if [ "$(edge_runtime_enabled "$supabase_wt")" = "true" ]; then
-  echo ""
-  echo "==> Starting edge functions..."
-  # Redirect the WHOLE subshell's fd 1/2 to /dev/null (not just the inner
-  # command's) and redirect stdin from /dev/null. Otherwise the backgrounded
-  # subshell keeps the parent's pipe (from command substitution) open, which
-  # deadlocks any caller that does OUTPUT=$(dev sb reset).
-  (cd "$supabase_wt" && supabase functions serve) </dev/null >/dev/null 2>&1 &
-  disown 2>/dev/null || true
-  sleep 5
-else
-  echo ""
-  echo "==> Skipping functions serve (edge_runtime disabled)"
-fi
+echo ""
+echo "==> Starting edge functions..."
+# Redirect the WHOLE subshell's fd 1/2 to /dev/null (not just the inner
+# command's) and redirect stdin from /dev/null. Otherwise the backgrounded
+# subshell keeps the parent's pipe (from command substitution) open, which
+# deadlocks any caller that does OUTPUT=$(dev sb reset).
+# config.toml commits to [edge_runtime] enabled = true — no need to check.
+(cd "$supabase_wt" && supabase functions serve) </dev/null >/dev/null 2>&1 &
+disown 2>/dev/null || true
+sleep 5
 
 echo ""
 echo "==> Done!"
