@@ -17,7 +17,15 @@ require_bare_repo() {
 }
 
 supabase_is_running() {
-  supabase status --output json >/dev/null 2>&1
+  # Check Docker for the db container rather than `supabase status`, which
+  # exits non-zero whenever any container is unhealthy/restarting — that
+  # made `dev sb down` refuse to stop a broken stack.
+  local supabase_wt project_id
+  supabase_wt="$(resolve_supabase_wt 2>/dev/null)" || return 1
+  [ -f "$supabase_wt/supabase/config.toml" ] || return 1
+  project_id="$(get_project_id "$supabase_wt")"
+  [ -n "$project_id" ] || return 1
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "supabase_db_${project_id}"
 }
 
 resolve_supabase_wt() {
@@ -311,15 +319,6 @@ get_db_port() {
   ' "$supabase_wt/supabase/config.toml"
 }
 
-edge_runtime_enabled() {
-  local supabase_wt="$1"
-  awk '
-    /^\[edge_runtime\]/ { in_er = 1; next }
-    /^\[/ { in_er = 0 }
-    in_er && /^enabled[[:space:]]*=/ { gsub(/[[:space:]]|"/, ""); sub(/.*=/, ""); print; exit }
-  ' "$supabase_wt/supabase/config.toml"
-}
-
 # --- Migration + seed engines ---
 
 # Flatten supabase/migrations/<subdir>/*.sql into a flat dir, run `supabase
@@ -444,6 +443,71 @@ wait_for_control_plane() {
   done
 }
 
+# --- Retry with progressive backoff -----------------------------------
+#
+# Generic retry wrapper for flaky Supabase/Docker operations. Backoff
+# grows linearly: 15s, 20s, 25s, 30s ... (10 + attempt * 5).
+#
+# Usage:
+#   retry_with_backoff <max_attempts> <label> <command> [args...]
+#
+# The command is invoked via "$@" — pass a function name (or an external
+# command). Inside an `if`, errexit is suspended, so a non-zero return
+# from the command is captured rather than terminating the caller.
+retry_with_backoff() {
+  local max_attempts="$1"; shift
+  local label="$1"; shift
+  local attempts=0
+  while true; do
+    attempts=$((attempts + 1))
+    if "$@"; then
+      return 0
+    fi
+    if [ "$attempts" -ge "$max_attempts" ]; then
+      echo "Error: $label failed after $max_attempts attempts" >&2
+      return 1
+    fi
+    local backoff=$((10 + attempts * 5))
+    echo "  (attempt $attempts/$max_attempts failed — retrying in ${backoff}s)"
+    sleep "$backoff"
+  done
+}
+
+# Run `supabase db reset --local` inside the supabase worktree, retrying
+# with progressive backoff. `supabase db reset --local` restarts
+# containers to clear PostgREST/edge-runtime caches; Kong can return a
+# transient 502 if it health-checks an upstream before it's fully back
+# up, so we retry up to 5 times.
+#
+# All scripts that need to reset the local DB MUST use this helper
+# rather than calling `supabase db reset` directly.
+#
+# Usage: supabase_db_reset_with_retry <supabase_wt>
+supabase_db_reset_with_retry() {
+  local supabase_wt="$1"
+  _supabase_db_reset_once() {
+    (cd "$supabase_wt" && supabase db reset --local)
+  }
+  retry_with_backoff 5 "supabase db reset --local" _supabase_db_reset_once
+}
+
+# Restart the Supabase stack (`supabase stop && supabase start`) and
+# wait for the pgflow ControlPlane edge function to respond. Each
+# attempt gives ControlPlane up to 30s (wait_for_control_plane) to come
+# up; up to 3 attempts with progressive backoff to absorb slow Docker
+# warm-up on macOS.
+#
+# Usage: supabase_stack_restart_ready <supabase_wt> <api_port>
+supabase_stack_restart_ready() {
+  local supabase_wt="$1"
+  local api_port="$2"
+  _supabase_stack_restart_ready_once() {
+    (cd "$supabase_wt" && supabase stop >/dev/null 2>&1 && supabase start >/dev/null 2>&1) || return 1
+    wait_for_control_plane "$api_port"
+  }
+  retry_with_backoff 3 "supabase stack restart" _supabase_stack_restart_ready_once
+}
+
 # --- Migration application wrapper ---
 
 apply_migrations() {
@@ -504,4 +568,65 @@ unlink_worktree_migrations() {
     (cd "$supabase_wt" && git checkout -f origin/main) 2>&1 | grep -v "^HEAD is now at" || true
     apply_migrations "$supabase_wt"
   fi
+}
+
+# Scaffold a pgflow Deno edge-function worker from templates. Idempotent: if
+# the worker directory already exists, returns without touching it.
+#
+# Usage: scaffold_pgflow_worker <invoking_wt> <supabase_wt> <slug>
+#
+# Expects supabase/flows/<kebab-slug>.ts to exist in the invoking worktree.
+# Templates live under scripts/templates/pgflow-worker/ (next to this file).
+# Pgflow version is pinned to whatever the supabase worktree's ControlPlane
+# function uses (supabase/functions/pgflow/deno.json), falling back to 0.14.1.
+scaffold_pgflow_worker() {
+  local invoking_wt="$1"
+  local supabase_wt="$2"
+  local slug="$3"
+
+  local kebab_slug
+  kebab_slug=$(echo "$slug" | sed 's/\([A-Z]\)/-\1/g' | sed 's/^-//' | tr '[:upper:]' '[:lower:]')
+  local worker_name="${kebab_slug}-worker"
+  local source_file="$invoking_wt/supabase/flows/${kebab_slug}.ts"
+  local worker_dir="$invoking_wt/supabase/functions/$worker_name"
+  local helpers_dir
+  helpers_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local template_dir="$helpers_dir/templates/pgflow-worker"
+  local pgflow_deno="$supabase_wt/supabase/functions/pgflow/deno.json"
+
+  if [ -d "$worker_dir" ]; then
+    return 0
+  fi
+  if [ ! -f "$source_file" ]; then
+    echo "    (warning: $source_file missing — skipping worker scaffold)"
+    return 0
+  fi
+  if [ ! -d "$template_dir" ]; then
+    echo "    (warning: $template_dir missing — skipping worker scaffold)"
+    return 0
+  fi
+
+  local flow_export
+  flow_export=$(grep -oE 'export const [A-Z][A-Za-z0-9_]* = new Flow' "$source_file" \
+    | head -n1 | awk '{print $3}')
+  if [ -z "$flow_export" ]; then
+    flow_export="$(echo "$slug" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+    echo "    (note: no 'export const ... = new Flow' found in $(basename "$source_file"); falling back to $flow_export)"
+  fi
+
+  local pgflow_version=""
+  if [ -f "$pgflow_deno" ]; then
+    pgflow_version=$(grep -oE '@pgflow/edge-worker@[^"/]+' "$pgflow_deno" | head -n1 | sed 's|.*@||')
+  fi
+  [ -z "$pgflow_version" ] && pgflow_version="0.14.1"
+
+  mkdir -p "$worker_dir"
+  sed \
+    -e "s|__FLOW_EXPORT__|${flow_export}|g" \
+    -e "s|__KEBAB_SLUG__|${kebab_slug}|g" \
+    "$template_dir/index.ts" > "$worker_dir/index.ts"
+  sed \
+    -e "s|__PGFLOW_VERSION__|${pgflow_version}|g" \
+    "$template_dir/deno.json" > "$worker_dir/deno.json"
+  echo "    Created worker scaffold: supabase/functions/${worker_name}/ (pgflow@${pgflow_version})"
 }

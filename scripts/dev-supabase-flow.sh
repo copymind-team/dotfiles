@@ -89,29 +89,54 @@ to_kebab_case() {
 # ── Sync invoking worktree's flow source into shared worktree ────────
 # Always sync — even when invoking from the shared worktree — so the behaviour
 # is uniform: compile consumes the invoking worktree's source.
+#
+# The edge-runtime worker imports the flow TS file directly, and the flow
+# imports UserJobKey from src/types/job-key.ts. Both must live under the
+# shared worktree at runtime — on failure we roll back to origin/main state,
+# but on success we leave them in place so the edge runtime can actually run
+# the flow. The scaffolded Deno worker dir is rsynced later (after compile).
 SHARED_JOB_KEY="$SUPABASE_WT/src/types/job-key.ts"
 LOCAL_JOB_KEY="$INVOKING_WT/src/types/job-key.ts"
+INVOKING_FUNCTIONS_DIR="$INVOKING_WT/supabase/functions"
+SHARED_FUNCTIONS_DIR="$SUPABASE_WT/supabase/functions"
 
 SHARED_FLOWS_BACKUP=$(mktemp -d)
-echo "==> Backing up shared worktree's flows to $SHARED_FLOWS_BACKUP"
-cp -a "$SHARED_FLOWS_DIR" "$SHARED_FLOWS_BACKUP/"
+echo "==> Backing up shared worktree's flows + functions to $SHARED_FLOWS_BACKUP"
+cp -a "$SHARED_FLOWS_DIR" "$SHARED_FLOWS_BACKUP/flows"
+if [ -d "$SHARED_FUNCTIONS_DIR" ]; then
+  cp -a "$SHARED_FUNCTIONS_DIR" "$SHARED_FLOWS_BACKUP/functions"
+fi
 if [ -f "$SHARED_JOB_KEY" ]; then
   cp -a "$SHARED_JOB_KEY" "$SHARED_FLOWS_BACKUP/job-key.ts"
 fi
 
-restore_shared_flows() {
-  echo ""
-  echo "==> Restoring shared worktree's flows"
-  rm -rf "$SHARED_FLOWS_DIR"
-  mv "$SHARED_FLOWS_BACKUP/flows" "$SHARED_FLOWS_DIR"
-  if [ -f "$SHARED_FLOWS_BACKUP/job-key.ts" ]; then
-    mv "$SHARED_FLOWS_BACKUP/job-key.ts" "$SHARED_JOB_KEY"
+SCRIPT_FAILED=true
+on_flow_exit() {
+  if [ "$SCRIPT_FAILED" = "true" ]; then
+    echo "" >&2
+    echo "==> Restoring shared worktree's flows + functions + job-key.ts (script failed)" >&2
+    rm -rf "$SHARED_FLOWS_DIR"
+    mv "$SHARED_FLOWS_BACKUP/flows" "$SHARED_FLOWS_DIR" 2>/dev/null || true
+    if [ -d "$SHARED_FLOWS_BACKUP/functions" ]; then
+      rm -rf "$SHARED_FUNCTIONS_DIR"
+      mv "$SHARED_FLOWS_BACKUP/functions" "$SHARED_FUNCTIONS_DIR" 2>/dev/null || true
+    fi
+    if [ -f "$SHARED_FLOWS_BACKUP/job-key.ts" ]; then
+      mv "$SHARED_FLOWS_BACKUP/job-key.ts" "$SHARED_JOB_KEY"
+    fi
+    # Intentionally NOT restarting the supabase stack here. With the
+    # destructive work-pass steps moved to run only after compile
+    # succeeds, a failure means the invoking worktree + DB are untouched
+    # and only the shared worktree's bind-mounted files were transiently
+    # changed. The edge runtime picks up the restored files on its next
+    # request — a stop/start here just kills `supabase functions serve`
+    # without restarting it and leaves the stack worse than pre-run.
+    echo "  (shared worktree files restored — no supabase restart;" >&2
+    echo "   edge runtime will re-read them on its next request)" >&2
   fi
   rm -rf "$SHARED_FLOWS_BACKUP"
-  echo "==> Restarting supabase stack to re-read restored flows"
-  (cd "$SUPABASE_WT" && supabase stop >/dev/null 2>&1 && supabase start >/dev/null 2>&1) || true
 }
-trap restore_shared_flows EXIT
+trap on_flow_exit EXIT
 
 echo "==> Syncing flow source from invoking worktree into shared worktree"
 rsync -a --delete "$INVOKING_FLOWS_DIR/" "$SHARED_FLOWS_DIR/"
@@ -120,12 +145,33 @@ if [ -f "$LOCAL_JOB_KEY" ]; then
   cp -a "$LOCAL_JOB_KEY" "$SHARED_JOB_KEY"
 fi
 
-# Recreate the edge runtime so per-file bind mounts pick up new files.
-echo "==> Restarting supabase stack from shared worktree (picks up new + changed flow files)"
+# Force the ControlPlane (Deno) to reload its module graph so the rsynced
+# flow TS is picked up. Without this, `npx pgflow compile` fails with
+# "Flow 'X' not found. Did you add it to pgflow/index.ts?" when the
+# shared wt's pre-rsync state didn't include the flow (e.g. fresh
+# `dev sb up` which reverts shared wt to origin/main).
+#
+# We restart just the `supabase functions serve` host process + its
+# edge-runtime container, not the full stack — full `supabase stop &&
+# supabase start` is slow (30–60s) and brittle on macOS Docker Desktop
+# (containers routinely come back unhealthy). The edge-runtime container
+# alone reboots in ~5s.
+echo "==> Reloading ControlPlane (edge runtime + functions serve)"
 API_PORT="$(awk '/^\[api\]/{f=1;next}/^\[/{f=0}f&&/^port[[:space:]]*=/{gsub(/[^0-9]/,"");print;exit}' "$SUPABASE_WT/supabase/config.toml")"
 [ -z "$API_PORT" ] && API_PORT=54321
-(cd "$SUPABASE_WT" && supabase stop >/dev/null 2>&1 && supabase start >/dev/null 2>&1) || true
-wait_for_control_plane "$API_PORT"
+PROJECT_ID="$(get_project_id "$SUPABASE_WT")"
+pkill -f 'supabase functions serve' 2>/dev/null || true
+docker restart "supabase_edge_runtime_${PROJECT_ID}" >/dev/null 2>&1 || true
+(cd "$SUPABASE_WT" && supabase functions serve) </dev/null >/dev/null 2>&1 &
+disown 2>/dev/null || true
+# Wait for ControlPlane to answer — any 2xx/4xx means function loaded,
+# 5xx/000 means still booting.
+CP_URL="http://localhost:${API_PORT}/functions/v1/pgflow"
+for _ in $(seq 1 30); do
+  code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$CP_URL" 2>/dev/null || echo 000)
+  case "$code" in 2*|4*) break ;; esac
+  sleep 2
+done
 
 # ── Pre-pass: validate each slug, decide what needs recompile ────────
 TODO_SLUGS=()
@@ -168,7 +214,7 @@ for SLUG in "${SLUGS[@]}"; do
 done
 
 # ── Work pass ────────────────────────────────────────────────────────
-PROJECT_ID="$(get_project_id "$SUPABASE_WT")"
+# PROJECT_ID was set above when reloading the ControlPlane.
 COMPILED_ANY=false
 for SLUG in ${TODO_SLUGS[@]+"${TODO_SLUGS[@]}"}; do
   SNAKE_SLUG=$(to_snake_case "$SLUG")
@@ -179,7 +225,40 @@ for SLUG in ${TODO_SLUGS[@]+"${TODO_SLUGS[@]}"}; do
   echo "==> Recompiling flow: $SLUG"
   COMPILED_ANY=true
 
-  OLD_FILES=$(find "$MIGRATIONS_DIR" \( -name "*_create_${SLUG}_flow.sql" -o -name "*_create_${SNAKE_SLUG}_flow.sql" \) 2>/dev/null || true)
+  # ── Compile first (failure-prone) — no destructive changes until this
+  # succeeds, so a transient ControlPlane hiccup leaves the tree + DB
+  # untouched and a retry of `dev sb flow` can pick up where it left off.
+  # `npx pgflow compile` writes to MIGRATIONS_DIR root (not jobs/) so it
+  # coexists with any OLD migration file still in jobs/.
+  compile_attempts=0
+  compile_max=3
+  while true; do
+    compile_attempts=$((compile_attempts + 1))
+    if (cd "$INVOKING_WT" && npx pgflow compile "$SLUG"); then
+      break
+    fi
+    if [ "$compile_attempts" -ge "$compile_max" ]; then
+      echo "" >&2
+      echo "Error: npx pgflow compile '$SLUG' failed after $compile_max attempts." >&2
+      echo "  Common causes:" >&2
+      echo "    - ControlPlane not running — try: dev sb up" >&2
+      echo "    - Docker Desktop DNS flake — retrying in a minute often works" >&2
+      echo "    - Deterministic flow-definition error — check the TS source" >&2
+      exit 1
+    fi
+    echo "  (compile attempt $compile_attempts/$compile_max failed — retrying in 3s)" >&2
+    sleep 3
+  done
+
+  NEW_FILE=$(find "$MIGRATIONS_DIR" -maxdepth 1 \( -name "*_create_${SLUG}_flow.sql" -o -name "*_create_${SNAKE_SLUG}_flow.sql" \) 2>/dev/null || true)
+  if [ -z "$NEW_FILE" ]; then
+    echo "Error: Migration file not found after compile" >&2
+    exit 1
+  fi
+
+  # ── Compile succeeded — now safe to do the destructive cleanup of the
+  # OLD migration + DB state.
+  OLD_FILES=$(find "$JOBS_DIR" \( -name "*_create_${SLUG}_flow.sql" -o -name "*_create_${SNAKE_SLUG}_flow.sql" \) 2>/dev/null || true)
 
   if [ -n "$OLD_FILES" ]; then
     OLD_VERSIONS=()
@@ -205,17 +284,9 @@ for SLUG in ${TODO_SLUGS[@]+"${TODO_SLUGS[@]}"}; do
     fi
   fi
 
-  (cd "$INVOKING_WT" && npx pgflow compile "$SLUG")
-
-  NEW_FILE=$(find "$MIGRATIONS_DIR" -maxdepth 1 \( -name "*_create_${SLUG}_flow.sql" -o -name "*_create_${SNAKE_SLUG}_flow.sql" \) 2>/dev/null || true)
-  if [ -n "$NEW_FILE" ]; then
-    mkdir -p "$JOBS_DIR"
-    mv "$NEW_FILE" "$JOBS_DIR/"
-    echo "    Moved to jobs/: $(basename "$NEW_FILE")"
-  else
-    echo "Error: Migration file not found after compile" >&2
-    exit 1
-  fi
+  mkdir -p "$JOBS_DIR"
+  mv "$NEW_FILE" "$JOBS_DIR/"
+  echo "    Moved to jobs/: $(basename "$NEW_FILE")"
 
   if ! grep -q "\[functions\.${WORKER_NAME}\]" "$CONFIG_FILE"; then
     echo "" >> "$CONFIG_FILE"
@@ -223,6 +294,8 @@ for SLUG in ${TODO_SLUGS[@]+"${TODO_SLUGS[@]}"}; do
     echo "verify_jwt = false" >> "$CONFIG_FILE"
     echo "    Added [functions.${WORKER_NAME}] to config.toml"
   fi
+
+  scaffold_pgflow_worker "$INVOKING_WT" "$SUPABASE_WT" "$SLUG"
 
   if ! grep -rq "track_worker_function('${WORKER_NAME}')" "$JOBS_DIR"; then
     TIMESTAMP=$(date -u -v+1S +"%Y%m%d%H%M%S" 2>/dev/null || date -u -d "+1 second" +"%Y%m%d%H%M%S")
@@ -236,6 +309,22 @@ SQL
 done
 
 if [ "$COMPILED_ANY" = true ]; then
+  # Scaffold writes worker dirs into the invoking worktree only. Rsync them
+  # into the shared worktree so `supabase functions serve` (which runs from
+  # the shared worktree) can enumerate + boot the new workers.
+  echo ""
+  echo "==> Syncing scaffolded worker(s) to shared worktree"
+  if [ -d "$INVOKING_FUNCTIONS_DIR" ]; then
+    rsync -a --delete "$INVOKING_FUNCTIONS_DIR/" "$SHARED_FUNCTIONS_DIR/"
+  fi
+
+  # Recreate the supabase stack so per-file bind mounts + the edge runtime's
+  # function enumeration pick up the new flow TS + worker dirs in one shot.
+  echo "==> Restarting supabase stack (picks up new flow + worker files)"
+  API_PORT="$(awk '/^\[api\]/{f=1;next}/^\[/{f=0}f&&/^port[[:space:]]*=/{gsub(/[^0-9]/,"");print;exit}' "$SUPABASE_WT/supabase/config.toml")"
+  [ -z "$API_PORT" ] && API_PORT=54321
+  supabase_stack_restart_ready "$SUPABASE_WT" "$API_PORT"
+
   echo ""
   echo "==> Applying migrations..."
   # Apply against the invoking worktree's migrations dir — dev sb link already
@@ -252,6 +341,10 @@ else
   echo ""
   echo "==> Nothing to apply — all flows up to date."
 fi
+
+# Mark success so the EXIT trap skips the restore (keeps synced flows + funcs
+# + job-key.ts in the shared worktree so the edge runtime can run the flow).
+SCRIPT_FAILED=false
 
 echo ""
 echo "==> Done!"

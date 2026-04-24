@@ -103,19 +103,12 @@ fi
 echo "COMPOSE_PROJECT_NAME=${REPO_NAME}-${SAFE_NAME}" >"$NEW_WORKTREE_DIR/.env"
 echo "Generated .env with COMPOSE_PROJECT_NAME"
 
-# --- Generate docker-compose.override.yml ---
-cat >"$NEW_WORKTREE_DIR/docker-compose.override.yml" <<EOF
-services:
-  app:
-    container_name: ${REPO_NAME}-${SAFE_NAME}
-    ports: !override
-      - "${NEW_PORT}:3000"
-EOF
-echo "Generated docker-compose.override.yml (host port $NEW_PORT -> container 3000)"
-
 # --- Register port ---
 printf "%s\t%s\t%s\n" "$SAFE_NAME" "$NEW_PORT" "$(date +%Y-%m-%d)" >>"$REGISTRY"
 echo "Registered in $REGISTRY"
+
+# --- Generate docker-compose.override.yml from the registry ---
+(cd "$NEW_WORKTREE_DIR" && "$SCRIPT_DIR/dev-worktree-port.sh")
 
 # --- Install dependencies ---
 echo "Installing dependencies..."

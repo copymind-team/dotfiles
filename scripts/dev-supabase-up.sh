@@ -41,6 +41,18 @@ apply_migrations "$supabase_wt"
 echo "Injecting Supabase env vars..."
 (cd "$supabase_wt" && "$SCRIPT_DIR/dev-worktree-env.sh")
 
+# Start edge functions runtime — pgflow's ensure_workers cron needs it up to
+# dispatch flow tasks to the worker endpoints. config.toml commits to
+# [edge_runtime] enabled = true project-wide, so no need to check.
+project_id="$(get_project_id "$supabase_wt")"
+if docker ps --filter "name=supabase_edge_runtime_${project_id}" --format "{{.Names}}" 2>/dev/null | grep -q .; then
+  echo "Edge functions already running."
+else
+  echo "Starting edge functions..."
+  (cd "$supabase_wt" && supabase functions serve) </dev/null >/dev/null 2>&1 &
+  disown
+fi
+
 echo ""
 echo "=== Supabase ready ==="
 echo "  Worktree: $supabase_wt"

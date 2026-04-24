@@ -26,10 +26,8 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
   exit 0
 fi
 
-# Window 1: claude — two horizontal panes
+# Window 1: claude
 tmux new-session -d -s "$SESSION" -n claude -c "$DIR"
-tmux split-window -h -t "$SESSION:claude" -c "$DIR"
-tmux select-pane -t "$SESSION:claude.1"
 
 # Window 2: nvim
 tmux new-window -t "$SESSION" -n nvim -c "$DIR"
