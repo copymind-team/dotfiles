@@ -52,9 +52,12 @@ fi
 ) &
 
 # --- Homebrew ---
+# NONINTERACTIVE=1 skips the installer's "Press RETURN" prompt and makes its
+# sudo-access check use `sudo -n -l mkdir`, so it reuses our cached ticket
+# from `sudo -v` above instead of re-prompting for the password.
 if ! command -v brew &>/dev/null; then
   info "Installing Homebrew..."
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   eval "$(/opt/homebrew/bin/brew shellenv)"
 else
   ok "Homebrew already installed"
