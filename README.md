@@ -72,7 +72,8 @@ dotfiles/
 │   ├── monitor.sh                # prefix+M session monitor
 │   ├── session-select.sh         # prefix+S session picker
 │   ├── claude-save.sh            # resurrect hook -> pane -> claude session map
-│   └── claude-restore.sh         # resurrect process -> claude --resume
+│   ├── claude-restore.sh         # resurrect process -> claude --resume
+│   └── claude-snapshot.sh        # claude session start/exit -> resurrect save
 ├── zsh/.zshrc
 ├── test.sh                       # Test runner shortcut
 └── install.sh
@@ -648,57 +649,113 @@ Notes:
 
 ## Session restore
 
-`tmux-resurrect` saves the layout and `tmux-continuum` replays it, every 15
+`tmux-resurrect` saves the layout and `tmux-continuum` replays it, every 5
 minutes and again on the next tmux server start. Out of the box that brings back
 the windows, the panes and each pane's directory — but not what was running in
 them. `nvim` is on resurrect's default process list; `claude` is not, so a claude
 window came back as a bare shell.
 
-Two scripts close that gap, and they hang off resurrect's own hooks:
+Three scripts close that gap. Two hang off resurrect's own hooks, one off
+Claude's:
 
-| Script                  | Runs                                                | Does                                                |
-| ----------------------- | --------------------------------------------------- | --------------------------------------------------- |
-| `tmux/claude-save.sh`   | `@resurrect-hook-post-save-all`, i.e. on every save | Writes `~/.claude/resurrect-map`                    |
-| `tmux/claude-restore.sh`| `@resurrect-processes`, in each restored claude pane| `exec claude --resume <the session that was there>` |
+| Script                    | Runs                                                 | Does                                                |
+| ------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
+| `tmux/claude-save.sh`     | `@resurrect-hook-post-save-all`, i.e. on every save  | Writes `~/.claude/resurrect-map`                    |
+| `tmux/claude-restore.sh`  | `@resurrect-processes`, in each restored claude pane | `exec claude --resume <the session that was there>` |
+| `tmux/claude-snapshot.sh` | Claude's `SessionStart` and `SessionEnd` hooks       | Takes a resurrect save when the state changes       |
 
 Claude already knows which conversation is in which pane —
 `~/.claude/sessions/<pid>.json` carries the session id, the cwd and the tmux
 pane. What it does not do is outlive the process, so after a reboot there is
-nothing left to read. `claude-save.sh` copies those three fields into one
+nothing left to read. `claude-save.sh` copies those fields into one
 tab-separated file, keyed by `<session>:<window>.<pane>` — the coordinates
-resurrect rebuilds from its own save:
+resurrect rebuilds from its own save — with the tmux socket alongside, since
+coordinates repeat between servers and only the socket tells them apart:
 
 ```
-graspen-pipeline:1.1	/Users/you/loop.git/graspen-pipeline	0101c585-a55b-41fe-b407-89bbb2ca0cf8
-article:1.1	        /Users/you/copymind-app/article	        da7d9d42-00f7-4128-9abe-f5eb3373fafe
-article:1.2	        /Users/you/copymind-app/article	        9e49e366-fa09-4b28-ba62-8df721d33bd1
+graspen-pipeline:1.1	/Users/you/loop.git/graspen-pipeline	0101c585-…	/private/tmp/tmux-501/default
+article:1.1	        /Users/you/copymind-app/article	        da7d9d42-…	/private/tmp/tmux-501/default
+article:1.2	        /Users/you/copymind-app/article	        9e49e366-…	/private/tmp/tmux-501/default
 ```
 
 Two conversations in one directory get one line each, which is the case
-`claude --continue` cannot express — it can only ever hand back the newest.
+`claude --continue` cannot express — it can only ever hand back the newest. A
+session whose process is no longer running gets no line at all: a claude that was
+killed rather than asked to leave can leave its registry file behind, naming a
+pane that has since moved on.
 
 On the way back, `claude-restore.sh` asks tmux where it is, looks up that line,
-and resumes it. What it does when the lookup misses:
+moves to the directory the line records, and resumes. What it does when the
+lookup misses:
 
-| Situation                                        | Result                    |
-| ------------------------------------------------ | ------------------------- |
-| Coordinates and directory both match a line      | `claude --resume <id>`    |
-| No line for this pane, nothing else claims the cwd| `claude --continue`      |
-| No line, but another pane claims the cwd         | `claude` (fresh)          |
-| Map missing, transcript deleted, id malformed    | `claude` (fresh)          |
+| Situation                                          | Result                 |
+| -------------------------------------------------- | ---------------------- |
+| A line for these coordinates, on this server       | `claude --resume <id>` |
+| No line for this pane, nothing else claims the cwd, and the cwd has a conversation | `claude --continue` |
+| No line, but another pane claims the cwd           | `claude` (fresh)       |
+| Map missing, transcript deleted, id malformed, line from another tmux server | `claude` (fresh) |
 
 `--continue` is the fallback because a claude started since the last save is
 invisible to the map, and its conversation is almost always the newest one in
-the directory. It is skipped when another pane claims the same directory: both
+the directory. It is skipped when another pane claims the same directory — both
 panes would resume the same conversation and show it to you twice, with the
-second pane's edits landing somewhere you are not looking.
+second pane's edits landing somewhere you are not looking — and when the
+directory has no conversation at all, where `--continue` does not start fresh but
+fails, taking the shell it was exec'd over with it.
+
+### The directory comes from the map, not the pane
+
+resurrect recreates a pane in whatever path its own save recorded, and that path
+is a guess: it is read off the pane's process, it falls back to the home
+directory when the directory has since been deleted, and once wrong it stays
+wrong, because the next save records the wrong answer again. A pane that came
+back in the wrong place used to take its claude with it — and with no line
+matching that directory, it would `--continue` whatever conversation was newest
+there, which in `$HOME` belongs to no project at all.
+
+So the cwd in the map is not a check, it is the answer: it is where claude itself
+said it was running, and `claude-restore.sh` moves there before exec'ing. If that
+directory is gone, the pane stays where resurrect put it, which is at least
+somewhere that exists.
+
+### A session you quit stays quit
+
+What a pane comes back as is decided entirely by the last snapshot, so anything
+that happens between two saves is invisible — which showed up as two complaints
+that look unrelated and are the same bug. A session started since the last save
+was not in it, so its pane came back as a bare shell. A session quit with `/exit`
+was still in it, so a pane closed on purpose reopened on the next boot, resuming
+a conversation you were finished with.
+
+`claude-snapshot.sh` saves when the state changes instead of when the clock says
+so. On `SessionStart`, straight away. On `SessionEnd`, only once the process is
+actually gone — the hook fires while claude is still up, and a save taken then
+would record the very thing it is meant to forget.
+
+Only a deliberate exit counts, and the reason says which is which:
+
+| Reason              | Means                          | Snapshot |
+| ------------------- | ------------------------------ | -------- |
+| `prompt_input_exit` | `/exit`, or `^D`               | yes      |
+| `logout`            | `/logout`                      | yes      |
+| `clear`             | `/clear` — the pane still has claude in it | no |
+| `other`             | signalled, e.g. by a reboot    | no       |
+
+That last row is the one that matters: a machine going down signals claude like
+anything else, and treating that as "you are done here" would save a screenful of
+empty shells over the layout at the one moment it is most worth keeping.
 
 Notes:
 
 - The map is written from the post-save hook, not on a timer, so it and the
-  layout beside it describe the same instant. Both are therefore up to 15
-  minutes stale, and a conversation started in the last quarter of an hour comes
-  back through `--continue` rather than by id.
+  layout beside it describe the same instant.
+- Snapshots are debounced to one per 30 seconds, so a fleet coming up at once
+  saves once rather than a dozen times.
+- Nothing snapshots during a restore, or for two minutes after one. A restore
+  brings panes up one at a time and sends each its command with `send-keys`, so
+  for a while the layout is real but half of it is still a shell waiting for
+  claude to appear; a save taken then restores nothing next time. resurrect's
+  `pre-restore-all` and `post-restore-all` hooks are what mark the window.
 - `claude-restore.sh` ends in `exec`, always. resurrect works out what a pane was
   running by asking `ps` for the shell's child, so a wrapper left sitting in
   between would be recorded instead of `claude`, stop matching, and the pane
@@ -706,15 +763,13 @@ Notes:
 - Matched as `~claude`, so `claude`, `claude -r` and `claude --resume <id>` all
   come back through the wrapper. The saved arguments are dropped — the map is a
   better answer than a stale command line.
-- The directory has to agree before an id is used. Pane ids are per-server, so a
-  second tmux server on the same machine can write a record under the same
-  coordinates.
 - Restoring a full fleet starts every one of those claude processes at once.
   Nothing is sent to the API until you type, but the transcripts are read from
   disk.
 - Tunables: `CLAUDE_RESURRECT_MAP` (default `~/.claude/resurrect-map`),
   `CLAUDE_SESSION_DIR` (default `~/.claude/sessions`), `CLAUDE_PROJECTS_DIR`
-  (default `~/.claude/projects`).
+  (default `~/.claude/projects`), `CLAUDE_SNAPSHOT_DEBOUNCE` (30s),
+  `CLAUDE_SNAPSHOT_COOLDOWN` (120s), `CLAUDE_SNAPSHOT_WAIT` (30s).
 - To turn it off, drop `@resurrect-processes` from `.tmux.conf`; panes still come
   back in the right directory, just without claude in them.
 
