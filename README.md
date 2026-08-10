@@ -156,35 +156,19 @@ Manages env vars across three places at once: `.env.example` (committed inventor
 ## tmux
 
 The prefix is `C-b`, splits are `v` and `s`, and panes are navigated with `hjkl`.
-Beyond that, three features live in `tmux/`, each one script hung off a binding
-or a plugin hook. This is the short version; the detail — what the screens look
-like, what every column means, and why each works the way it does — is in
-[tmux/README.md](tmux/README.md).
+Beyond that, three features live in `tmux/` — [tmux/README.md](tmux/README.md)
+covers the parts using them will not teach you.
 
-| Binding      | Feature                                           | What it does                                                                    |
+| Binding      | Feature                                           | What it does                                                                   |
 | ------------ | ------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `prefix + S` | [Session picker](tmux/README.md#session-picker)   | Every session in a popup, one keystroke to switch                                |
-| `prefix + M` | [Session monitor](tmux/README.md#session-monitor) | One line per session: what its Claude is doing, what it has cost, what is left   |
-| —            | [Session restore](tmux/README.md#session-restore) | The layout after a reboot, with each pane's Claude conversation still in it      |
+| `prefix + S` | [Session picker](tmux/README.md#session-picker)   | Every session in a popup, one keystroke to switch                              |
+| `prefix + M` | [Session monitor](tmux/README.md#session-monitor) | One row per session: what its Claude is doing, what it has cost, what is left   |
+| —            | [Session restore](tmux/README.md#session-restore) | The layout after a reboot, with each pane's Claude conversation still in it     |
 
-**Session picker.** `prefix + S` lists every session with a jump key — `1`-`9`
-then `a`-`z` — so switching is one keystroke rather than a scroll through
-`choose-session`. Keys are stable between openings, and only the client that
-opened the picker moves.
-
-**Session monitor.** `prefix + M` shows the fleet: one row per session with what
-its Claude window is doing right now (`working`, `NEEDS YOU`, `draft`, `idle`,
-`shell`), how much context it has used, what it has spent, and how many subagents
-it has in flight. Above the rows, each signed-in account's usage windows and when
-they clear; below them, spend for today, the last 7 and 30 days, and all time.
-State comes from two sources that see different things — the pane's screen and
-Claude's own hooks — neither overruling the other. The columns that are not on
-screen at all arrive from the exporters in [claude/](claude/README.md).
-
-**Session restore.** `tmux-resurrect` and `tmux-continuum` bring the layout back
-after a reboot; three scripts make sure each pane comes back with the *same
-Claude conversation* in it, in the directory it was running in. A session you
-quit with `/exit` stays quit — one killed by the reboot does not.
+The monitor is the one worth a sentence more: it reads what Claude Code exports
+about itself — context, cost, usage windows, subagents in flight — from the
+hooks and status line installed by [claude/](claude/README.md), so a machine
+without those gets the states and nothing else.
 
 ## Claude Code config
 
@@ -193,15 +177,8 @@ scripts the session monitor reads, and user-level `skills/`. The scripts and eac
 skill are symlinked; **settings are merged**, because Claude writes to that file
 itself and a symlink would drag every runtime toggle into git.
 
-`claude/settings.json` holds **exactly two keys** — `statusLine` and `hooks` —
-because those are what the monitor reads. Everything else in a Claude settings
-file belongs to whoever owns the laptop and is never tracked: editor mode, model,
-plugins, the `env` block with its tokens, and above all `permissions`. So
-`./install.sh` on a colleague's machine gives them the monitor integration and
-changes nothing else.
-
-Details — what the merge guarantees, how hooks from two sources coexist, and the
-two tests that keep secrets out of this repo — in
+Only `statusLine` and `hooks` are shared. Your model, editor mode, plugins, `env`
+block and permission posture are never tracked and never touched — see
 [claude/README.md](claude/README.md).
 
 ## Testing
