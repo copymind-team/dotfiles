@@ -15,7 +15,7 @@ source "$(dirname "$0")/../helpers.sh"
 echo ""
 printf "${BOLD}Unit: documentation links${RESET}\n"
 
-DOCS=("README.md" "tmux/README.md" "claude/README.md")
+DOCS=("README.md" "tmux/README.md")
 
 # Every heading in a file, as the anchor GitHub will give it.
 anchors_of() { # <file>
@@ -37,8 +37,6 @@ for doc in "${DOCS[@]}"; do
 done
 assert_contains "the root README hands off to tmux/" \
   "(tmux/README.md" "$(cat "$DOTFILES_DIR/README.md")"
-assert_contains "the root README hands off to claude/" \
-  "(claude/README.md" "$(cat "$DOTFILES_DIR/README.md")"
 
 header "every relative link resolves, file and anchor"
 broken=""
@@ -68,14 +66,16 @@ for doc in "${DOCS[@]}"; do
   done < <(links_of "$DOTFILES_DIR/$doc")
 done
 assert_eq "no broken links" "" "$(printf '%b' "$broken")"
-assert "and there were links to check" bash -c "[ '$count' -gt 10 ]"
+# A guard against the loop silently reading nothing -- "no broken links" and
+# "checked no links" print the same tick otherwise.
+assert "and there were links to check" bash -c "[ '$count' -ge 5 ]"
 
 # The split is only worth having if the root file stays the short one. This is a
 # smell test, not a budget: if the root grows past the folder docs again, the
 # implementation detail has crept back in.
 header "the root README stays the short one"
 root=$(grep -c . "$DOTFILES_DIR/README.md")
-sub=$(grep -ch . "$DOTFILES_DIR/tmux/README.md" "$DOTFILES_DIR/claude/README.md" | paste -sd+ - | bc)
+sub=$(grep -c . "$DOTFILES_DIR/tmux/README.md")
 assert "the folder docs carry more prose than the root" bash -c "[ '$sub' -gt '$root' ]"
 
 print_results

@@ -3,7 +3,7 @@
 `.tmux.conf` plus three features built on top of it: a
 [session picker](#session-picker), a [session monitor](#session-monitor) and
 [session restore](#session-restore). The first two read what Claude Code exports
-about itself — see [claude/](../claude/README.md).
+about itself, through the hooks and status line in `claude/`.
 
 | File                 | What it is                                 |
 | -------------------- | ------------------------------------------- |
@@ -107,8 +107,8 @@ Reading the rows:
 Worth knowing:
 
 - **The context and cost columns need the exporters.** Sessions on a machine
-  without [claude/](../claude/README.md) installed still get a state, from the
-  screen, and nothing else.
+  without `claude/` installed still get a state, from the screen, and nothing
+  else.
 - **The subagent count is never aged out**, unlike the state — expiring it would
   blank it on exactly the sessions it exists for. A pane with no Claude in it
   counts nothing, so a killed fleet stops being reported.

@@ -23,7 +23,6 @@ Team configuration files for local development.
 ```
 dotfiles/
 ├── claude/
-│   ├── README.md                  # How the settings merge works, and what it guarantees
 │   ├── settings.json              # Shared: statusLine + hooks only, nothing else
 │   ├── merge-settings.sh          # Merges the above into an existing config
 │   ├── statusline.sh              # Status line + context/cost export + spend ledger
@@ -167,19 +166,20 @@ covers the parts using them will not teach you.
 
 The monitor is the one worth a sentence more: it reads what Claude Code exports
 about itself — context, cost, usage windows, subagents in flight — from the
-hooks and status line installed by [claude/](claude/README.md), so a machine
-without those gets the states and nothing else.
+hooks and status line in [claude/](#claude-code-config), so a machine without
+those gets the states and nothing else.
 
 ## Claude Code config
 
-`claude/` holds the Claude Code setup: the shared settings, the two exporter
-scripts the session monitor reads, and user-level `skills/`. The scripts and each
-skill are symlinked; **settings are merged**, because Claude writes to that file
-itself and a symlink would drag every runtime toggle into git.
+`claude/` is installed by `./install.sh`, and puts this under every Claude Code
+session:
 
-Only `statusLine` and `hooks` are shared. Your model, editor mode, plugins, `env`
-block and permission posture are never tracked and never touched — see
-[claude/README.md](claude/README.md).
+```
+Opus 5 (1M context) · ctx 24% · $19.71 · 5h 7% · 7d 77%
+```
+
+Model, context used, session cost, and how much of the rolling five-hour and
+weekly usage windows is gone.
 
 ## Testing
 
