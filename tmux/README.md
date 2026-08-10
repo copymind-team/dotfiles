@@ -27,7 +27,7 @@ first, then `a`-`z`, so switching is one keystroke:
 
   1  admin                     1w
 ▸ 2 *dotfiles                  3w
-  3 +graspen-course-ai         2w
+  3 +infra                     2w
   M +monitor                   1w
   ...
   c  zz-other                  1w
@@ -87,15 +87,15 @@ its Claude window is doing right now.
 ```
  MONITOR  15 sessions  11 claude  1 working  1 need you  refresh 2s
 
-  os@pailab.co         11 sess  5h  17% to 5:20PM        7d  28% to Tue 11PM
-  work@acme.com         2 sess  5h 100% FULL to 6:02PM   7d  91% to Fri 9AM
+  you@example.com      11 sess  5h  17% to 5:20PM        7d  28% to Tue 11PM
+  work@example.com      2 sess  5h 100% FULL to 6:02PM   7d  91% to Fri 9AM
 
   1  admin                   shell
-  2  article                 draft           12%    $4.10  os        let's draft §3 now
-▸ 3  copyclaw                NEEDS YOU       61%   $22.65  work      Do you want to make this edit to auth.ts?
-  4  dotfiles                working         40%   $40.90  os        Cooking…
-  5  graspen-ci              idle        5a  14%   $41.61  os        Fix CI failure for course translation
-  6  graspen-course-ai       idle            35%   $39.75  work      Check AI-at-work course generation status
+  2  api                     draft           12%    $4.10  you       let's draft §3 now
+▸ 3  billing                 NEEDS YOU       61%   $22.65  work      Do you want to make this edit to auth.ts?
+  4  dotfiles                working         40%   $40.90  you       Cooking…
+  5  infra                   idle        5a  14%   $41.61  you       Fix the failing CI job on main
+  6  web                     idle            35%   $39.75  work      Check the nightly import status
   ...
   f  zz-other                other                  sleep
                                total active  $499.01  sub ~$487.01   api $12.00     extra ~$4.25
@@ -193,8 +193,8 @@ Between the header and the rows is one line per account the fleet is signed in
 to, carrying that account's own usage windows:
 
 ```
-  os@pailab.co         11 sess  5h  17% to 5:20PM        7d  28% to Tue 11PM
-  work@acme.com         2 sess  5h 100% FULL to 6:02PM   7d  91% to Fri 9AM
+  you@example.com      11 sess  5h  17% to 5:20PM        7d  28% to Tue 11PM
+  work@example.com      2 sess  5h 100% FULL to 6:02PM   7d  91% to Fri 9AM
 ```
 
 - **`11 sess`** — how many live sessions are on that account.
@@ -504,7 +504,7 @@ Notes:
   title.
 - Tunables: `MONITOR_INTERVAL` (seconds, default 2), `MONITOR_WINDOW` (preferred
   window name, default `claude`), `MONITOR_FILTER` (regex; list only matching
-  sessions, e.g. `^graspen-`), `MONITOR_SESSION` (default `monitor`),
+  sessions, e.g. `^web-`), `MONITOR_SESSION` (default `monitor`),
   `CLAUDE_MONITOR_DIR` (default `~/.claude/monitor`), `CLAUDE_SESSION_DIR`
   (Claude's own session registry, read to follow parked jobs, default
   `~/.claude/sessions`), `MONITOR_STALE` (seconds an exported state stays trusted,
@@ -539,9 +539,9 @@ resurrect rebuilds from its own save — with the tmux socket alongside, since
 coordinates repeat between servers and only the socket tells them apart:
 
 ```
-graspen-pipeline:1.1	/Users/you/loop.git/graspen-pipeline	0101c585-…	/private/tmp/tmux-501/default
-article:1.1	        /Users/you/copymind-app/article	        da7d9d42-…	/private/tmp/tmux-501/default
-article:1.2	        /Users/you/copymind-app/article	        9e49e366-…	/private/tmp/tmux-501/default
+infra:1.1   /Users/you/repo.git/infra   0101c585-…   /private/tmp/tmux-501/default
+web:1.1     /Users/you/repo.git/web     da7d9d42-…   /private/tmp/tmux-501/default
+web:1.2     /Users/you/repo.git/web     9e49e366-…   /private/tmp/tmux-501/default
 ```
 
 Two conversations in one directory get one line each, which is the case
