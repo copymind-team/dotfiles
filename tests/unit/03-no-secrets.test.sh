@@ -81,4 +81,19 @@ for f in "$ROOT"/claude/settings*.json; do
     "hooks statusLine" "$(jq -r 'keys | sort | join(" ")' "$f")"
 done
 
+# The documentation is written from real screens, and a real screen carries real
+# addresses -- the monitor's account lines are literally a list of who is signed
+# in. Illustrations belong on the reserved example domains, which cannot resolve
+# to anybody. There is no equivalent check for a product name appearing in a
+# sample session list; that one is on the reader.
+header "the docs illustrate with nobody's address"
+hits=$(
+  while IFS= read -r f; do
+    grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "$f" 2>/dev/null \
+      | grep -vE '@example\.(com|org|net)\b' \
+      | sed "s|^|${f#"$ROOT/"}:|" || true
+  done < <(git -C "$ROOT" ls-files '*.md')
+)
+assert_eq "no real email addresses in tracked markdown" "" "$hits"
+
 print_results

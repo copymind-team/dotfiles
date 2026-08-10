@@ -69,10 +69,11 @@ dotfiles/
 │   └── e2e/                      # Multi-command workflows
 ├── tmux/
 │   ├── .tmux.conf
-│   ├── monitor.sh                # prefix+M session monitor
-│   ├── session-select.sh         # prefix+S session picker
+│   ├── monitor.sh                # leader+M session monitor
+│   ├── session-select.sh         # leader+S session picker
 │   ├── claude-save.sh            # resurrect hook -> pane -> claude session map
-│   └── claude-restore.sh         # resurrect process -> claude --resume
+│   ├── claude-restore.sh         # resurrect process -> claude --resume
+│   └── claude-snapshot.sh        # claude session start/exit -> resurrect save
 ├── zsh/.zshrc
 ├── test.sh                       # Test runner shortcut
 └── install.sh
@@ -150,85 +151,39 @@ Manages env vars across three places at once: `.env.example` (committed inventor
 | `dev nc up`   | Bootstrap NanoClaw via launchd (kickstarts a stale registration) |
 | `dev nc down` | Bootout NanoClaw via launchd                                     |
 
-## Session picker
+## tmux
 
-`prefix + S` opens a popup listing every session with a jump key — digits `1`-`9`
-first, then `a`-`z`, so switching is one keystroke:
+`leader + S` — jump to a session:
 
 ```
- SESSIONS  12
-
-  1  admin                     1w
-▸ 2 *dotfiles                  3w
-  3 +graspen-course-ai         2w
-  M +monitor                   1w
-  ...
-  c  zz-other                  1w
-
-  j/k move  h/l column  enter switch  esc cancel
-  1-9/a-z/M jump directly   * here   + attached
+┌──────────────────────────────────────────────────────┐
+│ SESSIONS  12                                         │
+│                                                      │
+│  1  admin                                          1w│
+│▸ 2 *dotfiles                                       3w│
+│  3 +infra                                          2w│
+│  ...                                                 │
+│  c  zz-other                                       1w│
+│                                                      │
+│  j/k move  h/l column  enter switch  x kill          │
+│  1-9/a-z/M jump   esc cancel   * here   + attached   │
+└──────────────────────────────────────────────────────┘
 ```
 
-Either press a session's key, or walk the cursor to it with `j`/`k` (or the
-arrow keys) and hit `enter`. The cursor's row is highlighted (shown above as
-`▸`, which is also drawn, so the cursor survives a terminal with no colors), and
-it starts on the session you are already in. `h`/`l` step a whole column, so
-they do nothing while the list is one column wide. `esc` cancels; any other key
-is ignored rather than closing the popup under you.
-
-`*` marks the session this client is on, `+` one another client is attached to,
-and the last column counts windows. Only the client that opened the picker
-moves.
-
-Notes:
-
-- Replaces tmux's own `choose-session`, whose labels start at `0` and switch to
-  `M-a` from the tenth entry on, and are not configurable.
-- Sessions are listed alphabetically, so the keys are stable between openings —
-  they only shift when a session is created or destroyed. The cursor follows the
-  session it is on, not its index, so a session appearing or going away while the
-  popup is open does not move it.
-- The [monitor](#session-monitor) is always `M`, wherever it sorts, so the key
-  that reaches it from here is the one that opens it from anywhere else
-  (`prefix + M`). Lowercase `m` does the same, and is held for it whether or not
-  the monitor is running — so the sessions around it keep their keys either way.
-  `M` works even when the monitor is one of the entries a short client pushed
-  off the end.
-- A list too tall for the client flows into up to three columns, filled top to
-  bottom, rather than scrolling the first keys off the top. A client too short
-  even for that loses the header first, and says `... N more` if entries still
-  do not fit.
-- `h`, `j`, `k` and `l` are left out of the jump keys because they drive the
-  cursor, `x` because it kills, and `m` because the monitor holds it. That is 29
-  keys plus the monitor's `M`; sessions past them are listed without one, and
-  reachable with the cursor.
-- An arrow key is read as the `hjkl` it stands in for, in either encoding a
-  terminal may send it (`esc [ A` and `esc O A` both count, and modifiers such as
-  ctrl are ignored rather than swallowing the key), so it cannot be mistaken for
-  the bare `esc` that cancels. Special keys with nothing bound to them — `home`,
-  `page up`, the function keys — are ignored, and do not cancel or switch either.
-- Tunables: `PICKER_FILTER` (regex; list only matching sessions),
-  `PICKER_WIDTH` (popup width, default 56), `PICKER_COLW` (width of one column
-  once there is more than one, default 30), `MONITOR_SESSION` (the session that
-  gets `M`, default `monitor` — the same variable the monitor itself reads).
-
-## Session monitor
-
-`prefix + M` opens the `monitor` session: one line per tmux session, showing what
-its Claude window is doing right now.
+`leader + M` — what every session's Claude is doing:
 
 ```
  MONITOR  15 sessions  11 claude  1 working  1 need you  refresh 2s
 
-  os@pailab.co         11 sess  5h  17% to 5:20PM        7d  28% to Tue 11PM
-  work@acme.com         2 sess  5h 100% FULL to 6:02PM   7d  91% to Fri 9AM
+  you@example.com      11 sess  5h  17% to 5:20PM        7d  28% to Tue 11PM
+  work@example.com      2 sess  5h 100% FULL to 6:02PM   7d  91% to Fri 9AM
 
   1  admin                   shell
-  2  article                 draft           12%    $4.10  os        let's draft §3 now
-▸ 3  copyclaw                NEEDS YOU       61%   $22.65  work      Do you want to make this edit to auth.ts?
-  4  dotfiles                working         40%   $40.90  os        Cooking…
-  5  graspen-ci              idle        5a  14%   $41.61  os        Fix CI failure for course translation
-  6  graspen-course-ai       idle            35%   $39.75  work      Check AI-at-work course generation status
+  2  api                     draft           12%    $4.10  you       let's draft §3 now
+▸ 3  billing                 NEEDS YOU       61%   $22.65  work      Do you want to make this edit to auth.ts?
+  4  dotfiles                working         40%   $40.90  you       Cooking…
+  5  infra                   idle        5a  14%   $41.61  you       Fix the failing CI job on main
+  6  web                     idle            35%   $39.75  work      Check the nightly import status
   ...
   f  zz-other                other                  sleep
                                total active  $499.01  sub ~$487.01   api $12.00     extra ~$4.25
@@ -240,547 +195,23 @@ its Claude window is doing right now.
   j/k move   enter jump   1-9/a-z jump directly   r refresh   q back
 ```
 
-Press a session's key to jump to it, or move the cursor with `j`/`k` (or the
-arrow keys) and hit `enter`. The cursor's row is highlighted (shown above as `▸`,
-which is also drawn, so the cursor survives a terminal with no colors). Only the
-client showing the monitor moves, so other attached clients are left where they
-are. `q` or `esc` closes the monitor and puts the client back on the session it
-came from, rather than dropping it out of tmux — the monitor's session ends on
-the way out, and a client attached to a session that gets destroyed would
-otherwise detach. If there is nowhere to go back to — attached straight to the
-monitor with `tmux attach -t monitor`, or it is the only session left — `q` still
-detaches.
-
-`h`, `j`, `k` and `l` are left out of the jump keys because they drive the
-cursor — `h`/`l` do nothing here, the list being one column — and so are `q` and
-`r`. The cursor stays on its session across refreshes, even as sessions come and
-go and the keys shift under it. Arrow keys are read exactly as they are in the
-[picker](#session-picker): either encoding, modifiers ignored, and special keys
-with nothing bound to them ignored rather than closing the monitor.
-
-| State       | Means                                            |
-| ----------- | ------------------------------------------------ |
-| `working`   | Claude is generating                             |
-| `NEEDS YOU` | waiting on a permission, plan or select prompt   |
-| `draft`     | text typed into the prompt but not sent          |
-| `idle`      | up with an empty prompt; detail is its last task |
-| `shell`     | just a shell                                     |
-| `other`     | something else running; detail names the command |
-| `gone`      | session or pane disappeared                      |
-
-Two columns come from the status line rather than the screen: how much of the
-context window that session has used, and what it has cost. Both are blank for a
-session that has not answered yet or has no exporter installed — blank means
-unknown, which is not the same as zero.
-
-A fourth appears only when it has something to say: the account tag between the
-cost and the detail, on screens with more than one account in play — see
-[accounts and limits](#accounts-and-limits).
-
-`5a` is the third: how many subagents that session has in flight. Blank at zero,
-so it only shows up where something is actually running — see [counting
-subagents](#counting-subagents). It is the one number here that says nothing about
-the state beside it: a session that has handed five background agents their work
-and gone quiet reads `idle 5a`, and that is right. It will answer you now; its
-fleet is still busy.
-
-Under the rows is one line per window, each totalling the cost column over a
-longer reach than the one above it:
-
-- **`active`** — the sessions on screen, added up. The only row that dies with
-  them. It also carries the word `total` for the block; the rows under it are the
-  same total over a longer reach, so they do not repeat it.
-- **`today`**, **`7d`**, **`30d`**, **`all`** — every session that has run in
-  that window, whether or not it is still up. `7d` and `30d` are calendar days
-  including today, so `7d` on a Monday reaches back to the previous Tuesday.
-  These come from the ledger — see [spend over time](#spend-over-time).
-
-`active` and `today` overlap on purpose: the live sessions are part of the day
-they are running in. Each row is then split by how the spend was paid for:
-
-- **`sub ~$487.01`** — what the subscription absorbed, priced at API rates.
-  **This is not a bill.** On a subscription nothing is charged for it; the window
-  percentages are the real constraint. The tilde is there because it is an
-  estimate of a price nobody charged.
-- **`api $12.00`** — spend from a session authenticated to an API-billed account
-  instead of the subscription. No tilde: that figure is money.
-- **`extra ~$4.25`** — spend attributed to a window that was already full. Only
-  `active` can show it: it is worked out from the live exports, and the ledger
-  records what was spent rather than how.
-
-A column is left blank when nothing landed in it, the same as an empty cost cell
-in the rows above — no api spend and no api sessions look alike from here, and
-neither is worth a `$0.00`. A row whose spend never got classified still counts
-in its total, so a total can exceed `sub` plus `api`.
-
-Sessions are sorted into `sub`/`api` by whether Claude sends them `rate_limits`,
-which only goes to a Claude.ai subscription. A personal subscription never
-crosses over on its own: hitting the limit stops the session and tells you to run
-`/login` for an API-billed account, so anything landing in `api` got there
-because someone chose it. A session that has not answered yet counts toward
-neither.
-
-### Accounts and limits
-
-Between the header and the rows is one line per account the fleet is signed in
-to, carrying that account's own usage windows:
-
-```
-  os@pailab.co         11 sess  5h  17% to 5:20PM        7d  28% to Tue 11PM
-  work@acme.com         2 sess  5h 100% FULL to 6:02PM   7d  91% to Fri 9AM
-```
-
-- **`11 sess`** — how many live sessions are on that account.
-- **`5h 17% to 5:20PM`** — the rolling five-hour window and when it clears. This
-  is the one that bites when several sessions run at once; it falls on its own as
-  older usage rolls out of the window.
-- **`7d 28% to Tue 11PM`** — the weekly window. Only really moves one way until
-  it resets.
-- **`5h 100% FULL`** — the window is exhausted, drawn in red. Anything at or
-  above 100 counts: the figure is not clamped there, and readings of `101` have
-  turned up in live exports.
-- **A line with no numbers** — the account is there and has sessions on it, but
-  its only reading has been superseded (see below). Better an empty line than
-  last window's figures.
-
-The limit notice read off a session's screen — **`** You're close to your usage
-limit`** — stays in the header, since it is one session's report rather than an
-account's standing.
-
-The rows then carry a short tag saying which account each session's figures came
-from: the part of the address in front of the `@`, or the front of the whole
-address where two accounts share one. **The column only appears when there is more than one account
-to tell apart** — on the ordinary single-account screen every row would say the
-same word, so the detail keeps the space instead.
-
-Two things are deliberately kept off the account lines:
-
-- **API-billed sessions** are tagged `api` and get no line. They have no rate
-  limits at all, and putting them under whichever address the config holds would
-  count a session against a subscription it is not spending from.
-- **Sessions that have not said** — no exporter, or no answer yet — are tagged
-  blank. If *nothing* on screen names an account, the monitor falls back to the
-  single `5h`/`7d` pair in the header that it showed before any of this existed.
-
-#### What the label actually means
-
-**The account signed in when those numbers came back.** Not which account the
-session will use next — that distinction is the whole design, and getting it
-wrong is visible.
-
-Claude does not tell a status line who is signed in. The payload's keys are
-`context_window`, `cost`, `cwd`, `effort`, `exceeds_200k_tokens`, `fast_mode`,
-`model`, `output_style`, `prompt_id`, `rate_limits`, `session_id`,
-`session_name`, `thinking`, `transcript_path`, `version`, `vim` and `workspace` —
-checked against a real one, not the docs. The account is not in the transcript or
-in Claude's session registry either. The only place it is written down is
-Claude's own config, and with a single config dir that is **one global file**
-that `/login` rewrites for every session on the machine at once.
-
-So reading it at render time is wrong, and wrong in the way that looks right:
-sessions re-render for all sorts of reasons, and each one that did would pick up
-the account you had just switched to while still reporting the *previous*
-account's usage windows underneath it. One `/login` and the whole fleet relabels
-itself to an account most of it never used.
-
-`claude/statusline.sh` therefore only consults the config when the session has
-actually heard from the API since its last export — the limits, their reset times
-and the cost all arrive in the same response, so if none of them has moved there
-is no new reading to label and the previous label still describes the numbers
-being re-exported. A session that has answered since a switch relabels itself; one
-that has not keeps the account its figures belong to.
-
-Two consequences worth expecting:
-
-- **A line can name an account you have already left.** That is correct: those
-  numbers are that account's. It clears itself the moment the session answers.
-- **After a switch, nothing says which account an idle session will bill next.**
-  Globally it is the new one for everybody, and nothing observable from outside
-  the process distinguishes a session that has picked up new credentials from one
-  that has not. The monitor does not guess.
-
-Within an account the newest reading still wins, and a reading whose reset time
-has already passed is dropped rather than aged into second place — a session
-sitting idle across a rollover keeps re-exporting the old window's usage with a
-fresh timestamp on it.
-
-The address is read through a one-line cache in `~/.claude/monitor/accounts`,
-keyed off the config's own mtime, so the 120KB config is parsed on a login and a
-switch and almost never otherwise.
-
-#### Running two accounts at once
-
-`/login` switching gives you one account at a time. To keep two signed in
-simultaneously, give each its own config directory — it carries the whole account
-store, logins included:
-
-```sh
-CLAUDE_CONFIG_DIR=~/.claude-work claude    # /login once, then it stays
-```
-
-The monitor needs nothing configured for this: sessions started that way export
-their own address and pick up their own line.
-
-### Spend over time
-
-The `active` row only knows about sessions that are still up, because it adds up
-the cost column and that comes from the per-pane exports, which the next session
-in that pane overwrites. So `claude/statusline.sh` also keeps a ledger, in
-`~/.claude/monitor/spend`: one small file per session per day, named
-`<day>.<session id>`, holding the cents that session spent on that day and
-whether it was paying by subscription or by API key, and which account it was on
-at the time.
-
-Each write compares the session's cumulative cost against what the file last
-saw and adds the difference. On the first write of a new day the figure to
-measure against is carried over from the day that session wrote before, or a
-session left running past midnight would drop its whole history onto the new day.
-A `/clear` or a resume taking the cost backwards rebases instead of accruing a
-negative.
-
-The monitor sums today's files on every tick and the older ones once a day —
-days before today cannot change — so the four rows cost a handful of file reads
-and no forks.
-
-Worth knowing:
-
-- **It starts when it is installed.** There is no history before the first write;
-  the numbers are only complete from that day forward.
-- **It counts sessions outside tmux too.** The ledger is keyed by session id
-  rather than by pane, so anything running `claude` on this machine lands in it.
-  That also means it is this machine only.
-- **`today` overlaps `active`.** The live sessions are part of the day they are
-  running in, and are counted in both rows.
-- **A session already running when it was installed** had no earlier file to
-  carry from, so its history up to that point landed on that first day. Once,
-  at install, and only for what was already up.
-- **Nothing is ever pruned.** A few dozen files a day is nothing until it is;
-  `rm ~/.claude/monitor/spend/2025-*` is the whole cleanup story, at the cost of
-  those days leaving `all`.
-
-### Extra usage
-
-The `extra` column is inferred, from two independent sides:
-
-- **Arithmetic**, in `claude/statusline.sh`: each run compares the session's cost
-  against its own last export and files the difference under whether a window
-  read full when it was earned. Handles a window resetting mid-session, and a
-  `/clear` taking the cost back to zero.
-- **The screen**, in `monitor_scan_notice()`: the notices Claude renders near the
-  overage cap or after a refusal — "close to your usage limit", "out of extra
-  usage", "hit your monthly spend limit" — matched as whole phrases, and only in
-  the bottom few rows, since the transcript above is full of sentences that would
-  otherwise match.
-
-One caveat once extra usage is switched on. The API can report the weekly window
-as `seven_day_overage_included`, with the overage headroom folded into the
-denominator — in which case it may never read 100 while overage is being spent,
-and the arithmetic under-counts. Treat `extra` as a floor, and
-`CLAUDE_OVERAGE_AT` (default 100) as the knob if the percentage behaves
-differently.
-
-### Counting subagents
-
-`5a` in a row is how many subagents that session has in flight.
-
-There is nothing on the screen to count: Claude's fleet view lists agents only
-while it is open, and it is not on screen at all in a session nobody is looking at.
-Claude's own events do carry it. `SubagentStart` and `SubagentStop` each name the
-agent they are about, and `Stop` and `SubagentStop` both carry the whole
-background-task registry.
-
-So `claude/monitor-hook.sh` keeps a directory per pane,
-`~/.claude/monitor/<server pid>-<pane>.agents`, holding one empty file named for
-each agent in flight. The count is however many files are in it, which costs the
-monitor a glob and no forks at all. Files rather than a number in a file because
-five agents spawned in one turn is five copies of the hook running at once, and a
-number would need a read, an add and a write between them.
-
-The registry is what keeps it honest, at two points:
-
-- **Every `Stop`** reconciles the directory against it in both directions. `Stop`
-  fires once the main loop has finished, so nothing foreground can still be up: a
-  marker with nothing behind it is a leftover — an agent killed before its stop
-  event, or a session already running a fleet when the hooks were installed — and
-  can go.
-- **Every `SubagentStop`** adopts anything the registry names that has no marker,
-  and drops nothing but the agent that just stopped. Additive only, because that
-  snapshot excludes foreground agents and removing on it would take out every
-  foreground agent running in parallel. This is what stops a catch-up from waiting
-  out a turn — under a fleet, a session can stay busy for an hour.
-
-Unlike the exported state, the count is never aged out. A session that hands five
-background agents their work and goes quiet stops writing state long before they
-finish, and expiring the count would blank it on exactly the sessions it exists
-for. What guards it instead is the pane: a pane with no Claude in it counts
-nothing, whatever is left in its directory, so a fleet whose session was killed
-outright stops being reported rather than sitting there forever.
-
-Worth knowing:
-
-- **A stopped clock in the fleet view is not a finished agent.** It is idle between
-  turns and can be woken with a queued message, which restarts its clock. Claude's
-  registry still counts it, so this does too — the count and the fleet list agree.
-- **It needs the hooks.** A session running on a machine without them counts
-  nothing. A session that was already up when they were merged in does pick them
-  up — Claude Code re-reads `settings.json` — but a fleet it launched before that
-  is only counted once its next turn ends and the reconcile finds it.
-- **A fleet under a parked job is counted too**, by the same markers, filed under
-  the background session instead of the pane — [parked jobs](#parked-jobs).
-- **Subagents only.** Background shells, MCP tasks and monitors sit in the same
-  registry and are deliberately left out; Claude's own footer already counts those
-  ("6 shells, 2 monitors").
-- **A nested agent** — one an agent spawned itself — is counted while it runs, but
-  a reconcile may lose sight of it if the registry does not carry nested tasks, in
-  which case the count runs short until that agent stops.
-
-Which pane each session is judged by, in order: one actually running Claude, else
-one in a window named `claude`, else the session's active pane. If the Claude in
-that pane has parked its work on a background session, the row follows it — see
-[parked jobs](#parked-jobs). Claude Code
-reports its version as its process name (`2.1.223`), which is how it is
-recognised — so a window auto-renamed away from `claude` is still found, and so
-is Claude sitting in the half of a split that is not focused.
-
-### Parked jobs
-
-What is in a pane is not always what is doing the work. Handed something long,
-Claude parks it: a background session starts under its daemon and the pane shows
-that session instead. The daemon does not pass `$TMUX_PANE` on, so the session
-actually working — spending the money, running the agents — has no pane to be
-keyed by, and until this it exported nothing at all. The row then showed the
-*other* session's last numbers, frozen at the moment it parked, which is not stale
-by a little: it is the wrong session. One here read `8% $1.44` while its own status
-line said `ctx 14% · $70.46`.
-
-Claude keeps a registry that closes the gap, one small JSON file per running
-session in `~/.claude/sessions`. The session in the pane carries a `parkedJobId`,
-and the session doing the work carries the matching `jobId` beside its own session
-id — which is the key its exports are filed under:
-
-```
-pane %92 → its session id → parkedJobId → jobId → sess-<id>.state / .meta / .agents
-```
-
-So both exporters now fall back to keying by session id when there is no pane, and
-the monitor reads the registry once a tick into two flat indexes (bash 3.2 here has
-no associative arrays) and follows that chain per pane. State, context, cost and
-the agent count all come from whichever session the pane is really showing. A few
-dozen one-line files read by bash itself, so it costs no forks.
-
-Worth knowing:
-
-- **The link needs the pane's own export to exist**, since that is where the
-  session id comes from. The hook writes one from a session's first event, so this
-  is only ever missing where the exporters are not installed.
-- **A job that has exported nothing is not followed.** It has finished, or it runs
-  where the exporters do not — and the pane's own numbers, old as they are, are
-  then the best there is.
-- **`active` totals the parked session, not the pane's.** One row, one session; the
-  pane session's own spend is still in the ledger, so no day loses it.
-- **A background session that never gets `SessionEnd`** leaves its `sess-*` files
-  behind. They are a few hundred bytes and nothing reads them once the registry
-  stops naming them; `rm ~/.claude/monitor/sess-*` while nothing is parked is the
-  whole cleanup story.
-
-### How the state is worked out
-
-Two sources, because neither sees everything.
-
-**The screen**, via `capture-pane`. What matters is not the wording but *where
-Claude parked the cursor*, which says which widget has the keyboard: the input
-box holds it after the prompt glyph, and a dialog moves it onto the selected row.
-Wording alone will not separate them — "Do you want …" appears in Claude's own
-replies and in the transcript of prompts already answered. The separator after
-the glyph does: the input box uses a non-breaking space, every dialog a plain
-one. Position does not, because the dialog `AskUserQuestion` puts up is not
-indented and its selected row sits at column 0 looking exactly like an input box.
-
-Text on the prompt row is not proof anyone typed it, either: Claude fills an
-empty box with a dim suggestion of what to ask next. The cursor settles that too
-— typing moves it past the glyph — and only in the ambiguous case is one extra
-`capture-pane -pe` spent to check whether that text is dim.
-
-**Claude's own events**, via `claude/monitor-hook.sh`, which every hook runs and
-which leaves a state file per pane in `~/.claude/monitor`, plus the count of
-subagents that pane has running — [counting subagents](#counting-subagents).
-`claude/statusline.sh` adds context, cost, the usage windows and the account they
-were read under to the same place, since none of it is on the screen at all — and
-the account is not even in the payload Claude pipes it, so that one comes out of
-Claude's own config. Both key their files by tmux server pid and pane id, which
-is what `$TMUX_PANE` in their environment makes possible — or by session id where
-there is no pane, which is how a [parked job](#parked-jobs) is found.
-
-Neither source overrules the other:
-
-- `NEEDS YOU` — whichever notices first. Usually the screen: `Notification` lags
-  the prompt by about six seconds, a refresh tick is two.
-- `draft` — the screen only. No event fires for typing.
-- `working` / `idle` — the events, when fresh. They know a turn has started
-  before any of it reaches the screen.
-- `shell` / `other` / `gone` — the screen, and final.
-
-A session with no exporter installed — another machine, or one started before it
-was — loses the context and cost columns, contributes no account line, and
-nothing else. An exported state
-older than `MONITOR_STALE` is ignored, so a Claude killed before `SessionEnd`
-cannot leave a row stuck on `working`.
-
-Notes:
-
-- Everything is read by polling, so the monitor never attaches a client to the
-  monitored sessions and cannot resize or disturb them.
-- One `list-panes` covers every session. A tick over fifteen sessions costs
-  ~100ms, and every session is sampled at the same instant.
-- Claude Code UI strings live in `monitor_classify()` and `monitor_busy_titles()`
-  in `tmux/monitor.sh` — the places to fix if a release reworks the footer or the
-  title.
-- Tunables: `MONITOR_INTERVAL` (seconds, default 2), `MONITOR_WINDOW` (preferred
-  window name, default `claude`), `MONITOR_FILTER` (regex; list only matching
-  sessions, e.g. `^graspen-`), `MONITOR_SESSION` (default `monitor`),
-  `CLAUDE_MONITOR_DIR` (default `~/.claude/monitor`), `CLAUDE_SESSION_DIR`
-  (Claude's own session registry, read to follow parked jobs, default
-  `~/.claude/sessions`), `MONITOR_STALE` (seconds an exported state stays trusted,
-  default 90), `CLAUDE_OVERAGE_AT` (window percentage counted as exhausted,
-  default 100).
-- `prefix + M` replaces tmux's default "clear marked pane"; `prefix + m` still
-  toggles a mark.
-
-## Session restore
-
-`tmux-resurrect` saves the layout and `tmux-continuum` replays it, every 15
-minutes and again on the next tmux server start. Out of the box that brings back
-the windows, the panes and each pane's directory — but not what was running in
-them. `nvim` is on resurrect's default process list; `claude` is not, so a claude
-window came back as a bare shell.
-
-Two scripts close that gap, and they hang off resurrect's own hooks:
-
-| Script                  | Runs                                                | Does                                                |
-| ----------------------- | --------------------------------------------------- | --------------------------------------------------- |
-| `tmux/claude-save.sh`   | `@resurrect-hook-post-save-all`, i.e. on every save | Writes `~/.claude/resurrect-map`                    |
-| `tmux/claude-restore.sh`| `@resurrect-processes`, in each restored claude pane| `exec claude --resume <the session that was there>` |
-
-Claude already knows which conversation is in which pane —
-`~/.claude/sessions/<pid>.json` carries the session id, the cwd and the tmux
-pane. What it does not do is outlive the process, so after a reboot there is
-nothing left to read. `claude-save.sh` copies those three fields into one
-tab-separated file, keyed by `<session>:<window>.<pane>` — the coordinates
-resurrect rebuilds from its own save:
-
-```
-graspen-pipeline:1.1	/Users/you/loop.git/graspen-pipeline	0101c585-a55b-41fe-b407-89bbb2ca0cf8
-article:1.1	        /Users/you/copymind-app/article	        da7d9d42-00f7-4128-9abe-f5eb3373fafe
-article:1.2	        /Users/you/copymind-app/article	        9e49e366-fa09-4b28-ba62-8df721d33bd1
-```
-
-Two conversations in one directory get one line each, which is the case
-`claude --continue` cannot express — it can only ever hand back the newest.
-
-On the way back, `claude-restore.sh` asks tmux where it is, looks up that line,
-and resumes it. What it does when the lookup misses:
-
-| Situation                                        | Result                    |
-| ------------------------------------------------ | ------------------------- |
-| Coordinates and directory both match a line      | `claude --resume <id>`    |
-| No line for this pane, nothing else claims the cwd| `claude --continue`      |
-| No line, but another pane claims the cwd         | `claude` (fresh)          |
-| Map missing, transcript deleted, id malformed    | `claude` (fresh)          |
-
-`--continue` is the fallback because a claude started since the last save is
-invisible to the map, and its conversation is almost always the newest one in
-the directory. It is skipped when another pane claims the same directory: both
-panes would resume the same conversation and show it to you twice, with the
-second pane's edits landing somewhere you are not looking.
-
-Notes:
-
-- The map is written from the post-save hook, not on a timer, so it and the
-  layout beside it describe the same instant. Both are therefore up to 15
-  minutes stale, and a conversation started in the last quarter of an hour comes
-  back through `--continue` rather than by id.
-- `claude-restore.sh` ends in `exec`, always. resurrect works out what a pane was
-  running by asking `ps` for the shell's child, so a wrapper left sitting in
-  between would be recorded instead of `claude`, stop matching, and the pane
-  would restore exactly once.
-- Matched as `~claude`, so `claude`, `claude -r` and `claude --resume <id>` all
-  come back through the wrapper. The saved arguments are dropped — the map is a
-  better answer than a stale command line.
-- The directory has to agree before an id is used. Pane ids are per-server, so a
-  second tmux server on the same machine can write a record under the same
-  coordinates.
-- Restoring a full fleet starts every one of those claude processes at once.
-  Nothing is sent to the API until you type, but the transcripts are read from
-  disk.
-- Tunables: `CLAUDE_RESURRECT_MAP` (default `~/.claude/resurrect-map`),
-  `CLAUDE_SESSION_DIR` (default `~/.claude/sessions`), `CLAUDE_PROJECTS_DIR`
-  (default `~/.claude/projects`).
-- To turn it off, drop `@resurrect-processes` from `.tmux.conf`; panes still come
-  back in the right directory, just without claude in them.
+Both need the [Claude Code config](#claude-code-config) installed for the context
+and cost columns; without it the states still work.
+
+After a reboot, `tmux-resurrect` brings the layout back with each pane's Claude
+conversation still in it, in the directory it was running in — unless you quit
+that one with `/exit`, which stays quit.
 
 ## Claude Code config
 
-`claude/` holds the Claude Code setup: settings, the two exporter scripts the
-[session monitor](#session-monitor) reads, and user-level `skills/`. The scripts
-and each skill are symlinked. Settings are **merged**, because Claude writes to
-that file itself — `/model`, permission changes, enabled plugins — and a symlink
-would drag every runtime toggle into git as a dirty working tree.
+Under every Claude Code session:
 
-`claude/settings.json` holds **exactly two keys**: `statusLine` and `hooks`.
-Those are what the session monitor reads, so they are the only things worth
-sharing. Everything else in a Claude settings file belongs to whoever owns the
-laptop and is never tracked:
-
-| Shared, installed for everyone | Yours alone, never touched |
-| --- | --- |
-| `statusLine` | `editorMode`, `tui`, `model`, `enabledPlugins`, `extraKnownMarketplaces`, notifications |
-| `hooks` | `env` and its tokens |
-| | `permissions` — including `defaultMode` and the `skip*` prompts, which decide how much Claude does without asking |
-
-The merge only touches the keys it is given, so `./install.sh` on a colleague's
-machine gives them the monitor integration and changes nothing else. Their editor
-mode, model and permission posture survive every `git pull && ./install.sh`.
-
-The merge is `claude/merge-settings.sh`, runnable and testable on its own:
-
-```bash
-claude/merge-settings.sh <live.json> <shared.json>   # merged JSON on stdout
+```
+Opus 5 (1M context) · ctx 24% · $19.71 · 5h 7% · 7d 77%
 ```
 
-It refuses rather than damages — exit 1 on unreadable or invalid JSON, exit 2 if
-the shared file has grown an `env` block — and `install.sh` writes through a temp
-file, so a failure leaves the existing settings untouched.
-
-The two shared keys are applied differently:
-
-- **`statusLine` is replaced** — there is only one of it. If you already had a
-  custom one, the install says so and leaves the previous file at
-  `~/.claude/settings.json.bak`.
-- **`hooks` are appended per event**, so a colleague's own `PostToolUse`
-  formatter keeps running alongside ours. Entries pointing at our script are
-  removed first, so re-running never stacks duplicates.
-
-Paths inside are written as `~/.claude/…` rather than absolute, so the file is
-portable between machines and between users. Both the status line and hooks run
-their command through a shell, so the `~` expands.
-
-`tests/unit/04-claude-settings-merge.test.sh` covers the merge. Its main
-assertion is a property rather than a checklist: for every scalar leaf in the
-original config, outside the two keys we own, the merged result must hold the
-same value at the same path — which covers settings this repo has never heard of.
-It runs over a config containing something of everything, over the empty and
-near-empty cases, over this machine's real config if there is one, and three
-times in a row to prove the result converges. The detector itself is tested
-first, against a deliberately lossy pair, because "reports nothing lost" and
-"is broken" look identical from the outside.
-
-`tests/unit/03-no-secrets.test.sh` is the other backstop. It scans tracked and
-new-but-unignored files for credential-shaped tokens and for secret-named JSON
-keys with values, and it asserts the shared settings file contains nothing but
-`statusLine` and `hooks` — an allowlist, so widening what this repo pushes onto
-other laptops takes a deliberate edit to the test as well. The untracked half of
-the scan matters most: a secret is at its most dangerous in the moment before it
-is first committed.
+Model, context used, session cost, and how much of the rolling five-hour and
+weekly usage windows is gone.
 
 ## Testing
 
