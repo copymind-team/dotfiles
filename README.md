@@ -156,7 +156,7 @@ Manages env vars across three places at once: `.env.example` (committed inventor
 `leader + S` — jump to a session:
 
 ```
-┌─ sessions ───────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────┐
 │ SESSIONS  12                                         │
 │                                                      │
 │  1  admin                                          1w│
