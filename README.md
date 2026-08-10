@@ -68,7 +68,6 @@ dotfiles/
 │   ├── integration/              # Single-command tests
 │   └── e2e/                      # Multi-command workflows
 ├── tmux/
-│   ├── README.md                 # The picker, the monitor and session restore in full
 │   ├── .tmux.conf
 │   ├── monitor.sh                # prefix+M session monitor
 │   ├── session-select.sh         # prefix+S session picker
@@ -155,19 +154,54 @@ Manages env vars across three places at once: `.env.example` (committed inventor
 ## tmux
 
 The prefix is `C-b`, splits are `v` and `s`, and panes are navigated with `hjkl`.
-Beyond that, three features live in `tmux/` — [tmux/README.md](tmux/README.md)
-covers the parts using them will not teach you.
 
-| Binding      | Feature                                           | What it does                                                                   |
-| ------------ | ------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `prefix + S` | [Session picker](tmux/README.md#session-picker)   | Every session in a popup, one keystroke to switch                              |
-| `prefix + M` | [Session monitor](tmux/README.md#session-monitor) | One row per session: what its Claude is doing, what it has cost, what is left   |
-| —            | [Session restore](tmux/README.md#session-restore) | The layout after a reboot, with each pane's Claude conversation still in it     |
+`prefix + S` — jump to a session:
 
-The monitor is the one worth a sentence more: it reads what Claude Code exports
-about itself — context, cost, usage windows, subagents in flight — from the
-hooks and status line in [claude/](#claude-code-config), so a machine without
-those gets the states and nothing else.
+```
+ SESSIONS  12
+
+  1  admin                     1w
+▸ 2 *dotfiles                  3w
+  3 +infra                     2w
+  M +monitor                   1w
+  ...
+  c  zz-other                  1w
+
+  j/k move  h/l column  enter switch  esc cancel
+  1-9/a-z/M jump directly   * here   + attached
+```
+
+`prefix + M` — what every session's Claude is doing:
+
+```
+ MONITOR  15 sessions  11 claude  1 working  1 need you  refresh 2s
+
+  you@example.com      11 sess  5h  17% to 5:20PM        7d  28% to Tue 11PM
+  work@example.com      2 sess  5h 100% FULL to 6:02PM   7d  91% to Fri 9AM
+
+  1  admin                   shell
+  2  api                     draft           12%    $4.10  you       let's draft §3 now
+▸ 3  billing                 NEEDS YOU       61%   $22.65  work      Do you want to make this edit to auth.ts?
+  4  dotfiles                working         40%   $40.90  you       Cooking…
+  5  infra                   idle        5a  14%   $41.61  you       Fix the failing CI job on main
+  6  web                     idle            35%   $39.75  work      Check the nightly import status
+  ...
+  f  zz-other                other                  sleep
+                               total active  $499.01  sub ~$487.01   api $12.00     extra ~$4.25
+                                      today  $541.20  sub ~$521.20   api $20.00
+                                         7d $1180.05  sub ~$1140.05  api $40.00
+                                        30d $2620.11  sub ~$2540.11  api $80.00
+                                        all $8841.66  sub ~$8601.66  api $240.00
+
+  j/k move   enter jump   1-9/a-z jump directly   r refresh   q back
+```
+
+Both need the [Claude Code config](#claude-code-config) installed for the context
+and cost columns; without it the states still work.
+
+After a reboot, `tmux-resurrect` brings the layout back with each pane's Claude
+conversation still in it, in the directory it was running in — unless you quit
+that one with `/exit`, which stays quit.
 
 ## Claude Code config
 
