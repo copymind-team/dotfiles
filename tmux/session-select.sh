@@ -322,29 +322,63 @@ term_cols() {
   esac
 }
 
+# What an escape sequence the picker has no key for reports back as. It has to be
+# something no key is bound to -- so it is ignored, like any other stray key --
+# and it has to be non-empty, because empty is what enter reads as: home or page
+# up must not switch sessions.
+K_NONE=$'\a'
+
 # One keypress, waiting $1 seconds for it (forever when $1 is empty), with the
 # arrow keys reported as the hjkl they stand in for. Without that an arrow would
-# read as a bare esc and cancel the picker. The fractional timeout is what
-# distinguishes "esc alone" from "esc starting a sequence"; bash 3.2 rejects it,
-# and there an arrow just cancels.
+# read as a bare esc and cancel the picker.
+#
+# An arrow is esc, then '[' or 'O', then 'A'-'D', with optional parameter bytes
+# before the letter. All three forms turn up in practice: 'O' is what a terminal
+# sends once application cursor keys mode is on -- tmux switches a pane to it on
+# the program's request, and passes the outer terminal's arrows through in
+# whichever form the pane is in -- and the parameters carry the modifiers, so
+# ctrl-up arrives as "esc [ 1 ; 5 A".
+#
+# The sequence is read a byte at a time rather than in one two-byte gulp. That is
+# what makes the above possible, and it also gives each byte its own 50ms rather
+# than sharing one window between them: a keypress whose bytes arrive apart, which
+# over a slow link they do, reads as an arrow instead of cancelling the picker.
+#
+# The fractional timeout is what distinguishes "esc alone" from "esc starting a
+# sequence"; bash 3.2 rejects it, and there an arrow just cancels.
 picker_key() {
-  local k rest t=${1:-}
+  local k c t=${1:-}
   if [ -n "$t" ]; then
     IFS= read -rsn1 -t "$t" k || return 1
   else
     IFS= read -rsn1 k || return 1
   fi
-  if [ "$k" = $'\033' ]; then
-    IFS= read -rsn2 -t 0.05 rest 2>/dev/null || rest=""
-    case $rest in
-      '[A') k=k ;;
-      '[B') k=j ;;
-      '[C') k=l ;;
-      '[D') k=h ;;
-      *)    k=$'\033' ;;
+  [ "$k" = $'\033' ] || { printf '%s' "$k"; return; }
+
+  # Nothing behind the esc, or something that cannot begin a key sequence: the
+  # user pressed esc, which cancels.
+  IFS= read -rsn1 -t 0.05 c 2>/dev/null || c=""
+  case $c in
+    '['|'O') ;;
+    *) printf '%s' $'\033'; return ;;
+  esac
+
+  # The letter that says which key it was comes last, after any parameters; only
+  # the letter matters here, so the parameters are read and dropped.
+  k=""
+  while IFS= read -rsn1 -t 0.05 c 2>/dev/null; do
+    case $c in
+      [0-9]|';') continue ;;
+      *) k=$c; break ;;
     esac
-  fi
-  printf '%s' "$k"
+  done
+  case $k in
+    A) printf 'k' ;;
+    B) printf 'j' ;;
+    C) printf 'l' ;;
+    D) printf 'h' ;;
+    *) printf '%s' "$K_NONE" ;;
+  esac
 }
 
 # Puts question $1 where the footer goes and waits for one key, left in ASK_KEY.
@@ -578,11 +612,16 @@ open_popup() {
     "$(printf '%q --run' "$SELF")"
 }
 
-case ${1:-} in
-  --run)      run_picker ;;
-  ''|--open)  open_popup ;;
-  *)
-    printf 'usage: %s [--open|--run]\n' "$(basename "$0")" >&2
-    exit 2
-    ;;
-esac
+# Guarded so the file can be sourced for its functions -- which the tests do, to
+# reach the key reader without a terminal. Run normally, this is the only thing
+# that happens.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  case ${1:-} in
+    --run)      run_picker ;;
+    ''|--open)  open_popup ;;
+    *)
+      printf 'usage: %s [--open|--run]\n' "$(basename "$0")" >&2
+      exit 2
+      ;;
+  esac
+fi

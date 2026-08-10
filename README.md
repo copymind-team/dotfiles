@@ -202,6 +202,11 @@ Notes:
   cursor, `x` because it kills, and `m` because the monitor holds it. That is 29
   keys plus the monitor's `M`; sessions past them are listed without one, and
   reachable with the cursor.
+- An arrow key is read as the `hjkl` it stands in for, in either encoding a
+  terminal may send it (`esc [ A` and `esc O A` both count, and modifiers such as
+  ctrl are ignored rather than swallowing the key), so it cannot be mistaken for
+  the bare `esc` that cancels. Special keys with nothing bound to them — `home`,
+  `page up`, the function keys — are ignored, and do not cancel or switch either.
 - Tunables: `PICKER_FILTER` (regex; list only matching sessions),
   `PICKER_WIDTH` (popup width, default 56), `PICKER_COLW` (width of one column
   once there is more than one, default 30), `MONITOR_SESSION` (the session that
@@ -249,7 +254,9 @@ detaches.
 `h`, `j`, `k` and `l` are left out of the jump keys because they drive the
 cursor — `h`/`l` do nothing here, the list being one column — and so are `q` and
 `r`. The cursor stays on its session across refreshes, even as sessions come and
-go and the keys shift under it.
+go and the keys shift under it. Arrow keys are read exactly as they are in the
+[picker](#session-picker): either encoding, modifiers ignored, and special keys
+with nothing bound to them ignored rather than closing the monitor.
 
 | State       | Means                                            |
 | ----------- | ------------------------------------------------ |
