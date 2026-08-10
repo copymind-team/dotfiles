@@ -204,8 +204,7 @@ that one with `/exit`, which stays quit.
 
 ## Claude Code config
 
-`claude/` is installed by `./install.sh`, and puts this under every Claude Code
-session:
+Under every Claude Code session:
 
 ```
 Opus 5 (1M context) · ctx 24% · $19.71 · 5h 7% · 7d 77%
