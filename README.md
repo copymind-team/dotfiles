@@ -69,8 +69,8 @@ dotfiles/
 │   └── e2e/                      # Multi-command workflows
 ├── tmux/
 │   ├── .tmux.conf
-│   ├── monitor.sh                # prefix+M session monitor
-│   ├── session-select.sh         # prefix+S session picker
+│   ├── monitor.sh                # leader+M session monitor
+│   ├── session-select.sh         # leader+S session picker
 │   ├── claude-save.sh            # resurrect hook -> pane -> claude session map
 │   ├── claude-restore.sh         # resurrect process -> claude --resume
 │   └── claude-snapshot.sh        # claude session start/exit -> resurrect save
@@ -153,25 +153,24 @@ Manages env vars across three places at once: `.env.example` (committed inventor
 
 ## tmux
 
-The prefix is `C-b`, splits are `v` and `s`, and panes are navigated with `hjkl`.
-
-`prefix + S` — jump to a session:
+`leader + S` — jump to a session:
 
 ```
- SESSIONS  12
-
-  1  admin                     1w
-▸ 2 *dotfiles                  3w
-  3 +infra                     2w
-  M +monitor                   1w
-  ...
-  c  zz-other                  1w
-
-  j/k move  h/l column  enter switch  esc cancel
-  1-9/a-z/M jump directly   * here   + attached
+┌─ sessions ───────────────────────────────────────────┐
+│ SESSIONS  12                                         │
+│                                                      │
+│  1  admin                                          1w│
+│▸ 2 *dotfiles                                       3w│
+│  3 +infra                                          2w│
+│  ...                                                 │
+│  c  zz-other                                       1w│
+│                                                      │
+│  j/k move  h/l column  enter switch  x kill          │
+│  1-9/a-z/M jump   esc cancel   * here   + attached   │
+└──────────────────────────────────────────────────────┘
 ```
 
-`prefix + M` — what every session's Claude is doing:
+`leader + M` — what every session's Claude is doing:
 
 ```
  MONITOR  15 sessions  11 claude  1 working  1 need you  refresh 2s
