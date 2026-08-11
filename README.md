@@ -74,7 +74,9 @@ dotfiles/
 │   ├── claude-save.sh            # resurrect hook -> pane -> claude session map
 │   ├── claude-restore.sh         # resurrect process -> claude --resume
 │   └── claude-snapshot.sh        # claude session start/exit -> resurrect save
-├── zsh/.zshrc
+├── zsh/
+│   ├── .zshrc
+│   └── completions/_dev          # Tab completion for the dev CLI
 ├── test.sh                       # Test runner shortcut
 └── install.sh
 ```

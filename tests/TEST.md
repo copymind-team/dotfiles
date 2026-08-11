@@ -36,6 +36,7 @@ Pure functions and routers — no Supabase, no worktree state needed.
 | `16-ensure-functions-serve` | Container/host split-brain detection, spawn vs no-op (stubbed `docker`/`pgrep`)                                                             |
 | `22-prompt-secret`          | Masked secret prompt: star cap at 20 + true count, bracketed-paste capture, multi-line (no truncation), backspace/Enter                     |
 | `23-rollback-helpers`       | `rollback_path_for` mapping, `apply_rollbacks` reverse order + failure collection (stubbed `psql`), `ensure_rollbacks_excluded` idempotence |
+| `31-dev-completion`         | `_dev` branch listers against a bare-repo fixture, completion ↔ router drift, `.zshrc` wiring, TAB pressed in a real zsh over a pty        |
 
 ### Integration (`tests/integration/`)
 
