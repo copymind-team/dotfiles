@@ -1,0 +1,234 @@
+#compdef dev
+
+# Completion for the `dev` CLI (scripts/dev.sh).
+#
+# .zshrc puts this directory on fpath before Oh My Zsh calls compinit, and the
+# `#compdef dev` line above binds the file to the `dev` alias.
+#
+# The command names below are a second copy of the routers' case clauses, so
+# tests/unit/31-dev-completion.test.sh reads both and fails when they drift.
+
+# ── Branch listers ───────────────────────────────────────────────────
+#
+# Plain functions that print one name per line rather than calling compadd,
+# so the test can run them against a real bare repo without a completion
+# widget around them.
+
+# The directory name `dev wt up`/`down` derive from a branch name. Mirrors
+# `tr '/' '-' | tr -cd 'a-zA-Z0-9_.-'` in the scripts; keep the two in step.
+_dev_wt_safe_name() {
+  local name=${1//\//-}
+  print -r -- ${name//[^a-zA-Z0-9_.-]/}
+}
+
+# Where worktrees live: beside the one we are standing in. Empty outside a
+# worktree, which leaves every caller below with nothing to offer.
+_dev_wt_parent() {
+  local top
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [[ -n $top ]] && print -r -- ${${top:A}:h}
+  return 0
+}
+
+# Every branch that currently has a worktree. With `for-down`, narrowed to the
+# ones `dev wt down <branch>` can actually remove:
+#
+#   - not the worktree we are standing in; down refuses that one outright.
+#   - the worktree has to sit at <parent>/<safe-name>, because that is the only
+#     path down looks at. A worktree elsewhere (an agent's under
+#     .claude/worktrees/, or one whose directory was renamed away from its
+#     branch) would fail with "Directory does not exist", so offering it is
+#     worse than offering nothing.
+#
+# Paths go through `:A` because git records a worktree by the path it was
+# created with (/tmp/...) while rev-parse hands back the resolved one
+# (/private/tmp/...); compared raw, nothing matches.
+_dev_wt_worktree_branches() {
+  local mode=$1 line wt='' branch current='' parent=''
+  local -a out
+  current="$(git rev-parse --show-toplevel 2>/dev/null)"
+  if [[ -n $current ]]; then
+    current=${current:A}
+    parent=${current:h}
+  fi
+  for line in ${(f)"$(git worktree list --porcelain 2>/dev/null)"}; do
+    case $line in
+      ('worktree '*)
+        wt=${line#worktree }
+        wt=${wt:A}
+        ;;
+      ('branch refs/heads/'*)
+        branch=${line#branch refs/heads/}
+        if [[ $mode == for-down ]]; then
+          [[ -n $current && $wt == $current ]] && continue
+          [[ -n $parent && $wt == $parent/$(_dev_wt_safe_name $branch) ]] || continue
+        fi
+        out+=($branch)
+        ;;
+    esac
+  done
+  (( $#out )) && print -l -- $out
+  return 0
+}
+
+# Branch names `dev wt up` will check out rather than create: local branches
+# plus origin's, minus the ones it would refuse — already checked out in some
+# worktree, or their directory is already there. A brand-new name is equally
+# valid, so this is a hint, not a constraint.
+_dev_wt_up_branches() {
+  local parent branch
+  local -a taken all out
+  parent=$(_dev_wt_parent)
+  taken=(${(f)"$(_dev_wt_worktree_branches)"})
+  all=(
+    ${(f)"$(git for-each-ref --format='%(refname:strip=2)' refs/heads 2>/dev/null)"}
+    ${(f)"$(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin 2>/dev/null)"}
+  )
+  # origin/HEAD strips down to a bare HEAD — a symref, not a branch.
+  all=(${all:#HEAD})
+  for branch in ${(u)all:|taken}; do
+    [[ -n $parent && -e $parent/$(_dev_wt_safe_name $branch) ]] && continue
+    out+=($branch)
+  done
+  (( $#out )) && print -l -- $out
+  return 0
+}
+
+# ── Groups ───────────────────────────────────────────────────────────
+
+_dev_session() {
+  # dev s [-n name] [directory]
+  if [[ ${words[CURRENT-1]} == -n ]]; then
+    _message -e name 'session name'
+    return
+  fi
+  _alternative \
+    'options:option:((-n\:"session name, defaults to the directory basename"))' \
+    'directories:directory:_files -/'
+}
+
+_dev_worktree() {
+  local -a subcommands branches
+  subcommands=(
+    'init:Bootstrap first worktree + port registry from a fresh bare clone'
+    'up:Create a git worktree with Docker isolation'
+    'down:Tear down a git worktree and free the port'
+    'env:Set up .env.local for current worktree'
+    'port:Write docker-compose.override.yml from the port registry'
+    'info:Show info about the current worktree'
+  )
+  if (( CURRENT == 3 )); then
+    _describe -t commands 'dev wt command' subcommands
+    return
+  fi
+  # up and down take exactly one branch; the rest take nothing.
+  (( CURRENT == 4 )) || return
+  case ${words[3]} in
+    up)   branches=(${(f)"$(_dev_wt_up_branches)"}) ;;
+    down) branches=(${(f)"$(_dev_wt_worktree_branches for-down)"}) ;;
+    *)    return ;;
+  esac
+  if (( $#branches )); then
+    _describe -t branches branch branches
+  else
+    _message -e branch 'branch name'
+  fi
+}
+
+_dev_supabase() {
+  local -a subcommands
+  subcommands=(
+    'up:Create supabase worktree and start Supabase'
+    'down:Stop the shared Supabase instance'
+    'status:Show Supabase status'
+    'link:Symlink this worktree'\''s migrations and apply them'
+    'unlink:Remove this worktree'\''s migration symlinks'
+    'sync:Fetch origin/main, update the supabase worktree, clean stale symlinks'
+    'migrate:Apply pending migrations in the shared worktree'
+    'seed:Apply pending seeds from supabase/seeds/'
+    'reset:Full local reset — db reset, migrate, seed, serve functions'
+    'flow:Compile pgflow flows and apply them against the shared stack'
+    'anchor:Point the edge runtime'\''s COPYMIND_API_HOST at this worktree'\''s port'
+  )
+  if (( CURRENT == 3 )); then
+    _describe -t commands 'dev sb command' subcommands
+    return
+  fi
+  case ${words[3]} in
+    down)   _values 'flag' '--force[skip the confirmation prompt]' ;;
+    sync)   _values 'flag' '--reset[reset the database after syncing]' ;;
+    unlink) _values 'flag' '--reset[reset the database instead of applying rollbacks]' ;;
+    flow)   _message -e slug 'flow slug (default: all)' ;;
+  esac
+}
+
+_dev_env() {
+  local -a subcommands
+  subcommands=(
+    'add:Add a var to .env.example, .env.local, and Vercel'
+    'remove:Remove a var from those places'
+    'rm:Remove a var from those places'
+    'pull:Refresh .env.local from Vercel (development env)'
+    'push:Bulk-push .env.local entries to Vercel development'
+  )
+  if (( CURRENT == 3 )); then
+    _describe -t commands 'dev e command' subcommands
+    return
+  fi
+  case ${words[3]} in
+    add|remove|rm)
+      # Without a flag all three Vercel envs are targeted.
+      _alternative \
+        'options:scope:((--prod\:"production + preview" --dev\:"development only"))' \
+        'names:name:_message -e name "var name (e.g. STRIPE_SECRET_KEY)"'
+      ;;
+    push) _values 'flag' '--force[overwrite keys that already exist]' ;;
+  esac
+}
+
+_dev_nanoclaw() {
+  local -a subcommands
+  subcommands=(
+    'up:Bootstrap NanoClaw via launchd (kickstarts a stale registration)'
+    'down:Bootout NanoClaw via launchd'
+  )
+  (( CURRENT == 3 )) && _describe -t commands 'dev nc command' subcommands
+}
+
+# ── Entry point ──────────────────────────────────────────────────────
+
+_dev() {
+  local -a commands
+  commands=(
+    's:Tmux dev sessions'
+    'session:Tmux dev sessions'
+    'sb:Shared local Supabase instance'
+    'supabase:Shared local Supabase instance'
+    'wt:Git worktrees with Docker isolation'
+    'worktree:Git worktrees with Docker isolation'
+    'e:Env vars across .env.example, .env.local, Vercel'
+    'env:Env vars across .env.example, .env.local, Vercel'
+    'nc:Manage the NanoClaw host service via launchd'
+    'nanoclaw:Manage the NanoClaw host service via launchd'
+    'upd:Pull latest dotfiles changes'
+    'update:Pull latest dotfiles changes'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'dev command' commands
+    return
+  fi
+  case ${words[2]} in
+    s|session)   _dev_session ;;
+    sb|supabase) _dev_supabase ;;
+    wt|worktree) _dev_worktree ;;
+    e|env)       _dev_env ;;
+    nc|nanoclaw) _dev_nanoclaw ;;
+  esac
+}
+
+# $compstate exists only while a completion widget is running, so sourcing
+# this file outside completion (as the test does, to reach the branch listers)
+# defines the functions without trying to complete anything.
+if (( $+compstate )); then
+  _dev "$@"
+fi
