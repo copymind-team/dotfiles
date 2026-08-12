@@ -22,15 +22,18 @@
 # from Claude's own events -- in $CLAUDE_MONITOR_DIR, and those are merged in.
 # Sessions without them lose the extra columns and nothing else.
 #
-# The status line also keeps a ledger there of what every session has spent, day
-# by day, which outlives the sessions themselves: that is where the day, week,
-# month and all-time figures on the total line come from.
+# The status line also keeps two ledgers there that outlive the sessions
+# themselves: what every session has spent, day by day, which is where the day,
+# week, month and all-time figures on the total line come from, and each account's
+# last usage reading, which is what keeps an account on screen after the fleet has
+# switched off it.
 #
 # Tunables: MONITOR_INTERVAL (seconds, default 2), MONITOR_WINDOW (preferred
 # window name, default "claude"), MONITOR_FILTER (regex; only sessions matching
 # it are listed, default all), MONITOR_SESSION (default "monitor"),
 # CLAUDE_MONITOR_DIR (default ~/.claude/monitor), MONITOR_STALE (seconds an
-# exported state stays trusted, default 90).
+# exported state stays trusted, default 90), MONITOR_ACCT_KEEP (seconds an
+# account with nothing live on it keeps its line, default 8 days).
 set -uo pipefail
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -308,7 +311,32 @@ ACC_LIM5=(); ACC_LIM7=()
 ACC_RST5=(); ACC_RST7=()   # formatted, like X_RST5
 ACC_TS=()     # write time of the reading held above, so the newest one wins
 ACC_TAG=()    # short label for the session rows; see monitor_acc_tags
+ACC_OFF=()    # nothing live on it: the line comes from the ledger below
 ACC_SHOWN=0   # accounts with a line of their own, i.e. not "api" and not unknown
+ACC_LIVE=0    # of those, the ones a session is actually reporting
+
+# --- accounts with nothing live on them ---------------------------------------
+#
+# An account used to leave the screen the moment its last session did, which is
+# the wrong moment. Switching away is exactly when its windows matter: you left
+# because one of them was full, and what you want to see afterwards is how full,
+# and when it comes back. Reading it off the sessions cannot survive that -- the
+# export belongs to a pane, and a pane that has moved to another account, or has
+# no Claude in it at all, has nothing left to say about the one you left.
+#
+# So the status line also files each reading under the account itself, in
+# $MONITOR_DIR/limits/<address>, and those files outlive every session on them.
+# This is where an account with no live session gets its line from. Same reading,
+# same newest-wins rule, same test for whether it has been superseded -- the only
+# difference is where it was read and that the line says nothing is running on it.
+#
+# Kept for a week and a day, which is one weekly window plus the day it resets
+# on: past that the reading describes nothing current and the account has not
+# been used since, so the line would be a name and two blanks. The files
+# themselves are left alone -- one per account is not worth a delete, and the
+# next reading rewrites it in place.
+ACCT_DIR="$MONITOR_DIR/limits"
+ACCT_KEEP=${MONITOR_ACCT_KEEP:-691200}
 
 # The notices Claude Code puts up about limits and extra usage. These are matched
 # rather than any field, because the field does not exist anywhere reachable:
@@ -522,7 +550,97 @@ monitor_acc_slot() {
   ACC_KEY+=("$1"); ACC_N+=(0)
   ACC_LIM5+=(""); ACC_LIM7+=("")
   ACC_RST5+=(""); ACC_RST7+=("")
-  ACC_TS+=(0); ACC_TAG+=("")
+  ACC_TS+=(0); ACC_TAG+=(""); ACC_OFF+=("")
+  return 0
+}
+
+# Takes the reading just read into the KV_* variables as account $ACC_I's, if it
+# beats the one already there. Shared by the live exports and the ledger, so both
+# get the same two rules.
+#
+# The newest write wins, because the limits are account-wide and every session on
+# one account reports the same pair -- but each only rewrites its file when its
+# own status line runs, so the files disagree by however long ago that was.
+#
+# A fresh write timestamp is not enough to trust them, though. These numbers come
+# from the last API response that session received, so a session sitting idle
+# across a window rollover keeps re-exporting the old window's usage with a new
+# timestamp on it -- most of the fleet reads that way most of the time. The reset
+# epoch is what gives it away: once it is in the past the figure it came with
+# describes a window that has since rolled, whatever the timestamp says. Better no
+# number than last window's, so it is dropped rather than shown.
+#
+# Each window is judged by its own epoch, because they roll at completely
+# different rates. A reading taken six hours ago has certainly outlived its 5-hour
+# window and almost certainly not its weekly one -- and on an account nothing is
+# running on any more, that weekly figure is the whole reason to still be looking
+# at it. Condemning the pair on the 5-hour epoch would throw it away every time.
+monitor_acc_reading() {
+  local now=$1 p5="" p7=""
+  case $KV_TS in ''|*[!0-9]*) return 1 ;; esac
+  [ "$KV_TS" -gt "${ACC_TS[$ACC_I]}" ] || return 1
+  [ -n "$KV_LIM5$KV_LIM7" ] && [ "$KV_LIM5" != -1 ] || return 1
+  monitor_reset_pending "$KV_RST5" "$now" && p5=1
+  monitor_reset_pending "$KV_RST7" "$now" && p7=1
+  # Nothing in it describes a window we are still in, so there is nothing to take
+  # -- and the timestamp is not taken either, which leaves an older reading that
+  # does describe one able to win.
+  [ -n "$p5$p7" ] || return 1
+  ACC_TS[$ACC_I]=$KV_TS
+  monitor_reset_texts "$KV_RST5" "$KV_RST7"
+  if [ -n "$p5" ]; then
+    ACC_LIM5[$ACC_I]=$KV_LIM5
+    ACC_RST5[$ACC_I]=$RST5_OUT
+  else
+    ACC_LIM5[$ACC_I]=""
+    ACC_RST5[$ACC_I]=""
+  fi
+  if [ -n "$p7" ]; then
+    ACC_LIM7[$ACC_I]=$KV_LIM7
+    ACC_RST7[$ACC_I]=$RST7_OUT
+  else
+    ACC_LIM7[$ACC_I]=""
+    ACC_RST7[$ACC_I]=""
+  fi
+  return 0
+}
+
+# The accounts the ledger remembers, for the ones with no session left to report
+# them. Called after the sessions have been counted, since that count is what
+# says which accounts need this -- and the reading is merged for every account it
+# holds, live or not: it is the same reading the sessions are exporting, so on a
+# live account it either loses to a fresher one or is that fresher one, filed by a
+# session that has since gone.
+monitor_acc_remembered() {
+  local f b now=$MON_NOW cutoff
+  [ -d "$ACCT_DIR" ] || return 0
+  [ "$now" -gt 0 ] 2>/dev/null || return 0
+  cutoff=$((now - ACCT_KEEP))
+  for f in "$ACCT_DIR"/*; do
+    [ -f "$f" ] || continue
+    b=${f##*/}
+    # An address and nothing else: a temp file caught mid-rename, or whatever
+    # else ends up in the directory, is not one of ours. The same check the
+    # status line makes on the way in, because a name is drawn on the screen.
+    case $b in
+      *@*) ;;
+      *) continue ;;
+    esac
+    case $b in
+      *[!A-Za-z0-9@._+-]*) continue ;;
+    esac
+    KV_LIM5=""; KV_LIM7=""; KV_RST5=""; KV_RST7=""; KV_TS=0
+    monitor_read_kv "$f" || continue
+    case $KV_TS in ''|*[!0-9]*) continue ;; esac
+    [ "$KV_TS" -ge "$cutoff" ] || continue
+    monitor_acc_slot "$b"
+    monitor_acc_reading "$now" || true
+    # Whether this account has a line of its own to earn, rather than a row on
+    # the screen already saying where it is. Set after the merge and not before,
+    # so an account whose sessions have all gone is still described by the
+    # freshest reading any of them left.
+    [ "${ACC_N[$ACC_I]}" -eq 0 ] && ACC_OFF[$ACC_I]=1
+  done
   return 0
 }
 
@@ -560,29 +678,43 @@ monitor_acc_tags() {
   done
 }
 
-# Which accounts get a line, and in what order: alphabetical, so a line does not
-# jump because a session on some other account came or went.
+# Which accounts get a line, and in what order: alphabetical within each half, so
+# a line does not jump because a session on some other account came or went.
 #
 # Left out are the two keys that are not subscriptions to report on -- "api",
 # which has no limits by construction, and the unknown account, whose reading
-# goes to the header instead -- and any account with nothing live on it, which is
-# how a meta file left behind by a session that has since died stops being drawn
-# as an account you are signed in to.
+# goes to the header instead -- and any account whose only trace is a meta file a
+# dead session left in a pane. An account with nothing live on it is drawn only
+# where the ledger remembers it, which is what tells a switched-away account from
+# a stale export.
 ACC_ORDER=()
 ACC_TAGGED=0
 monitor_acc_order() {
   local i=0 n=${#ACC_KEY[@]} j k t
-  ACC_ORDER=(); ACC_SHOWN=0; ACC_TAGGED=0
+  local sk=()   # what each entry sorts by, in step with ACC_ORDER
+  ACC_ORDER=(); ACC_SHOWN=0; ACC_LIVE=0; ACC_TAGGED=0
   while [ "$i" -lt "$n" ]; do
-    if [ "${ACC_N[$i]}" -gt 0 ] && [ -n "${ACC_KEY[$i]}" ]; then
-      ACC_TAGGED=$((ACC_TAGGED + 1))
+    if [ -n "${ACC_KEY[$i]}" ] &&
+       { [ "${ACC_N[$i]}" -gt 0 ] || [ -n "${ACC_OFF[$i]:-}" ]; }; then
+      # The column on the rows is for telling live sessions apart, so only an
+      # account with sessions on it counts toward whether there is one.
+      [ "${ACC_N[$i]}" -gt 0 ] && ACC_TAGGED=$((ACC_TAGGED + 1))
       if [ "${ACC_KEY[$i]}" != api ]; then
+        [ "${ACC_N[$i]}" -gt 0 ] && ACC_LIVE=$((ACC_LIVE + 1))
         j=${#ACC_ORDER[@]}
         ACC_ORDER+=("$i")
+        # Live accounts first and the rest under them, each half alphabetical.
+        # The screen is about what is running; what is not is context for it.
+        if [ "${ACC_N[$i]}" -gt 0 ]; then
+          sk+=("0${ACC_KEY[$i]}")
+        else
+          sk+=("1${ACC_KEY[$i]}")
+        fi
         while [ "$j" -gt 0 ]; do
           k=$((j - 1))
-          [[ ${ACC_KEY[${ACC_ORDER[$k]}]} > ${ACC_KEY[${ACC_ORDER[$j]}]} ]] || break
+          [[ ${sk[$k]} > ${sk[$j]} ]] || break
           t=${ACC_ORDER[$j]}; ACC_ORDER[$j]=${ACC_ORDER[$k]}; ACC_ORDER[$k]=$t
+          t=${sk[$j]}; sk[$j]=${sk[$k]}; sk[$k]=$t
           j=$k
         done
       fi
@@ -599,7 +731,8 @@ monitor_read_exports() {
   X_STATE=(); X_DETAIL=(); X_CTX=(); X_COST=(); X_COSTF=(); X_AGENTS=()
   X_ACCT=()
   ACC_KEY=(); ACC_N=(); ACC_LIM5=(); ACC_LIM7=(); ACC_RST5=(); ACC_RST7=()
-  ACC_TS=(); ACC_TAG=(); ACC_ORDER=(); ACC_SHOWN=0; ACC_TAGGED=0
+  ACC_TS=(); ACC_TAG=(); ACC_OFF=(); ACC_ORDER=()
+  ACC_SHOWN=0; ACC_LIVE=0; ACC_TAGGED=0
   X_LIM5=""; X_LIM7=""; X_RST5=""; X_RST7=""
   X_COST_SUB=""; X_COST_API=""; X_COST_OVER=""; X_COST_ALL=""; X_NOTICE=""
   i=0
@@ -658,36 +791,11 @@ monitor_read_exports() {
       X_ACCT[$i]=$acck
       monitor_acc_slot "$acck"
 
-      # The limits are account-wide, so every session on one account reports the
-      # same pair -- but each only rewrites its file when its own status line
-      # runs, so the files disagree by however long ago that was. Take them from
-      # the newest file on that account rather than from whichever session
-      # happens to be read last, which is alphabetical order and could be
-      # minutes out of date.
-      #
-      # A fresh write timestamp is not enough to trust them, though. These
-      # numbers come from the last API response that session received, so a
-      # session sitting idle across a window rollover keeps re-exporting the old
-      # window's usage with a new timestamp on it -- most of the fleet reads that
-      # way most of the time. The reset epoch is what gives it away: once it is
-      # in the past the reading has been superseded, whatever its timestamp says.
-      # Better no number than last window's, so a superseded one is skipped
-      # rather than aged into second place.
-      case $KV_TS in
-        ''|*[!0-9]*) ;;
-        *)
-          if [ "$KV_TS" -gt "${ACC_TS[$ACC_I]}" ] &&
-             [ -n "$KV_LIM5$KV_LIM7" ] && [ "$KV_LIM5" != -1 ] &&
-             monitor_reset_pending "$KV_RST5" "$now"; then
-            ACC_TS[$ACC_I]=$KV_TS
-            ACC_LIM5[$ACC_I]=$KV_LIM5
-            ACC_LIM7[$ACC_I]=$KV_LIM7
-            monitor_reset_texts "$KV_RST5" "$KV_RST7"
-            ACC_RST5[$ACC_I]=$RST5_OUT
-            ACC_RST7[$ACC_I]=$RST7_OUT
-          fi
-          ;;
-      esac
+      # Whichever reading on this account is newest and still current -- see
+      # monitor_acc_reading, which the ledger goes through as well, so a session
+      # read here and a file left behind by one that has gone are judged the same
+      # way.
+      monitor_acc_reading "$now" || true
       # Into whichever column this session is paying from. A session that has not
       # answered yet reports neither, and is left out rather than guessed at.
       case $KV_COST in
@@ -1482,6 +1590,13 @@ monitor_acc_window() {
 # this is the one place on the screen with room for it, and the tags on the rows
 # are only readable because this says what they stand for.
 #
+# The session count is what says whether the line is describing something running
+# or something remembered: a live account has at least one by construction, so a
+# line reading "0 sess" is an account the fleet has left -- switched away from, or
+# whose sessions have all ended -- kept on screen for its windows. The whole line
+# is dimmed with it, the address included, so the two kinds do not have to be told
+# apart by reading a number.
+#
 # Built twice, plain and colored, because the escapes make the string longer than
 # it looks and a row that overflows the terminal wraps, which shifts every line
 # under it and breaks the redraw. Under the width it is drawn in color; over it,
@@ -1489,10 +1604,11 @@ monitor_acc_window() {
 # drift apart.
 ACC_ROW=""
 monitor_acc_row() {
-  local width=$1 idx=$2 acct sess plain c5 c7 lead tail tailc
+  local width=$1 idx=$2 acct sess plain c5 c7 lead tail tailc ca=""
   local w5 h5 k5 w7 h7 k7 p5=5h
   acct=${ACC_KEY[$idx]}
   [ ${#acct} -gt 20 ] && acct=${acct:0:20}
+  [ -n "${ACC_OFF[$idx]:-}" ] && ca=$C_DIM
   printf -v sess '%2s sess' "${ACC_N[$idx]}"
   monitor_acc_window "${ACC_LIM5[$idx]}" "${ACC_RST5[$idx]}"
   w5=$ACC_WIN; h5=$ACC_WIN_HOT; k5=$ACC_WIN_KNOWN
@@ -1537,8 +1653,8 @@ monitor_acc_row() {
     ACC_ROW="${plain:0:$width}$T_EL"$'\n'
     return 0
   fi
-  printf -v lead '  %-20s ' "$acct"
-  ACC_ROW="$lead$C_DIM$sess$C_RST$tailc$T_EL"$'\n'
+  printf -v lead '%-20s' "$acct"
+  ACC_ROW="  $ca$lead$C_RST $C_DIM$sess$C_RST$tailc$T_EL"$'\n'
   return 0
 }
 
@@ -1594,6 +1710,11 @@ monitor_collect() {
       ACC_N[$ACC_I]=$((ACC_N[$ACC_I] + 1))
     i=$((i + 1))
   done
+
+  # The accounts no session is reporting any more, from the ledger that outlives
+  # them: read after the count above, because the count is what says which those
+  # are.
+  monitor_acc_remembered
 
   # The account column earns its place only once there is more than one account
   # to tell apart. On the ordinary single-account screen every row would carry
@@ -1738,11 +1859,13 @@ monitor_draw() {
     done
   fi
 
-  # The account block, between the header and the rows: one line per account the
-  # fleet is signed in to, with that account's own windows on it. Not in the
-  # header bar, because there can be more than one of them and the bar is one
-  # line; not in a column, because the numbers belong to the account rather than
-  # to any session, and a column would repeat each one down every row it owns.
+  # The account block, between the header and the rows: one line per account,
+  # with that account's own windows on it -- the ones the fleet is signed in to
+  # first, then the ones it has left but whose windows are still running down.
+  # Not in the header bar, because there can be more than one of them and the bar
+  # is one line; not in a column, because the numbers belong to the account rather
+  # than to any session, and a column would repeat each one down every row it
+  # owns.
   i=0
   while [ "$i" -lt "$ACC_SHOWN" ]; do
     monitor_acc_row "$w" "${ACC_ORDER[$i]}"
@@ -1768,7 +1891,11 @@ monitor_draw() {
     # leave the reverse video short of the right edge.
     # A window reading 100 is FULL, not "nearly there": the utilization behind it
     # is clamped, so it cannot climb past that to say how far past it went.
-    if [ "$ACC_SHOWN" -eq 0 ]; then
+    # Gated on the accounts a session is actually reporting, not on the lines in
+    # the block: a remembered account is not this fleet's reading, and hiding the
+    # pair behind one would take the header away from an installation whose
+    # sessions never name an account at all.
+    if [ "$ACC_LIVE" -eq 0 ]; then
       if [ -n "$X_LIM5" ]; then
         hdr="$hdr  5h ${X_LIM5}%"
         [ "$X_LIM5" -ge 100 ] 2>/dev/null && hdr="$hdr FULL"
