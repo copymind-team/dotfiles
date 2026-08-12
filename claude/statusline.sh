@@ -159,6 +159,7 @@ fi
 # session that has ended belongs to nothing on the screen. The id is what makes
 # it a different reading by construction.
 acct=$p_acct
+fresh=""
 if [ -z "$p_had" ] || [ -z "$p_acct" ] ||
    [ "$session" != "$p_sess" ] ||
    [ "$lim5" != "$p_lim5" ] || [ "$lim7" != "$p_lim7" ] ||
@@ -178,6 +179,11 @@ if [ -z "$p_had" ] || [ -z "$p_acct" ] ||
   # says "Not logged in" however signed in the home one is -- so falling back to
   # the home config when a config dir has no .claude.json yet would name an
   # account this session is certainly not using.
+  #
+  # Remembered as well, for the account ledger further down: it files a reading
+  # rather than a label, and wants the same "this session has actually heard from
+  # the API since last time" test to decide whether there is one worth filing.
+  fresh=1
   acct=""
   conf=${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json
   [ -r "$conf" ] || conf=""
@@ -207,6 +213,70 @@ if [ -z "$p_had" ] || [ -z "$p_acct" ] ||
       fi
     fi
   fi
+fi
+
+# --- the account's own windows, kept where they outlive the session -----------
+#
+# The per-pane export below says which account a session's numbers were taken
+# under, and that is enough for as long as the session is up. It is not enough
+# across a switch: `/login` moves the whole machine, every session relabels
+# itself as it answers, and the account you just left goes off the monitor
+# entirely -- taking with it the one thing you switched away because of, which is
+# how full its windows were and when they come back.
+#
+# So the reading is also filed under the account itself, once per account rather
+# than once per session, in a place nothing overwrites when the sessions on it
+# end. The monitor reads these for accounts it can no longer see a session on.
+# Same shape as the spend ledger, and for the same reason: a durable fact next to
+# a live one.
+#
+# Only a fresh reading is filed. A re-render re-exports the same numbers with a
+# new timestamp on it, and writing those would let a session that has been idle
+# since before a rollover outrank one that has actually just answered.
+#
+# Subscriptions only. An API-billed session has no windows to remember, and the
+# address in the config is not the one paying for it.
+if [ -n "$fresh" ] && [ "$sub" = 1 ]; then
+  # Anything that is not a plain address is dropped rather than turned into a
+  # filename -- the value has been through this check once already, on its way
+  # out of the config, but it has been through a file since and this is the one
+  # use of it that is not just printed.
+  case $acct in
+    ''|.|..|*[!A-Za-z0-9@._+-]*) ;;
+    *)
+      # The 5-hour figure is what says the reading has windows in it at all --
+      # the same test the monitor applies to a live one, so a pair that would not
+      # be shown is not filed either. The weekly one rides along as it comes.
+      case $lim5 in
+        ''|-1|*[!0-9]*) ;;
+        *)
+          limdir=${CLAUDE_MONITOR_DIR:-$HOME/.claude/monitor}/limits
+          if mkdir -p "$limdir" 2>/dev/null; then
+            # Two sessions on one account both file their readings here, so the
+            # write is skipped when what is already there is newer -- a render
+            # delayed behind a slow one must not put the older pair on top.
+            limts=0
+            if [ -r "$limdir/$acct" ]; then
+              while IFS='=' read -r _k _v; do
+                [ "$_k" = ts ] && limts=$_v
+              done < "$limdir/$acct"
+              case $limts in ''|*[!0-9]*) limts=0 ;; esac
+            fi
+            if [ "$now" -ge "$limts" ] 2>/dev/null; then
+              limtmp="$limdir/.tmp.$$"
+              if printf 'lim5=%s\nlim7=%s\nrst5=%s\nrst7=%s\nacct=%s\nts=%s\n' \
+                   "$lim5" "$lim7" "$rst5" "$rst7" "$acct" "$now" > "$limtmp" 2>/dev/null
+              then
+                mv -f "$limtmp" "$limdir/$acct" 2>/dev/null || rm -f "$limtmp" 2>/dev/null
+              else
+                rm -f "$limtmp" 2>/dev/null
+              fi
+            fi
+          fi
+          ;;
+      esac
+      ;;
+  esac
 fi
 
 # "1.234" -> CENTS=123, in integer arithmetic because bash has no floats.

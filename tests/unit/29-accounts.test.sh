@@ -56,6 +56,16 @@ status_tick sess-a
 assert_eq "the address out of Claude's own config" \
   "alice@example.com" "$(value_of "$CLAUDE_MONITOR_DIR/sess-sess-a.meta" acct)"
 
+header "the account's own windows are filed where they outlive the session"
+# What keeps an account on the monitor after the fleet has switched off it: the
+# per-pane export goes with the pane, this does not.
+assert_eq "the 5h reading, under the address" \
+  "7" "$(value_of "$CLAUDE_MONITOR_DIR/limits/alice@example.com" lim5)"
+assert_eq "and the weekly one" \
+  "20" "$(value_of "$CLAUDE_MONITOR_DIR/limits/alice@example.com" lim7)"
+assert_eq "with the reset it came with" \
+  "$AHEAD" "$(value_of "$CLAUDE_MONITOR_DIR/limits/alice@example.com" rst5)"
+
 header "the spend ledger carries it too"
 assert_eq "so a day can be split by who paid for it later" \
   "alice@example.com" \
@@ -137,9 +147,25 @@ assert_eq "including the limits" \
 # ── what the monitor makes of it ─────────────────────────────────────
 
 # Sourced for its functions; the dispatch at the bottom is guarded, so nothing
-# runs and no terminal is needed.
+# runs and no terminal is needed. Colors are forced on, since the monitor turns
+# them off when stdout is not a terminal and one of the assertions below is about
+# what gets colored; the rows are compared with the escapes stripped or in full,
+# so nothing else minds.
+export MONITOR_FORCE_COLOR=1
 # shellcheck disable=SC1090
 source "$MONITOR"
+
+# The addresses the half above signed in and out of are still on file, and this
+# half is about what the monitor makes of a fleet it describes itself. Cleared so
+# the two fixtures do not mix; the accounts kept across a switch have a section of
+# their own at the end, which puts back what it needs.
+rm -rf "$CLAUDE_MONITOR_DIR/limits"
+
+limits_file() { # remember account $1 at 5h $2, 7d $3, resetting $4, written $5
+  mkdir -p "$CLAUDE_MONITOR_DIR/limits"
+  printf 'lim5=%s\nlim7=%s\nrst5=%s\nrst7=%s\nacct=%s\nts=%s\n' \
+    "$2" "$3" "$4" "$AHEAD" "$1" "${5:-$NOW}" > "$CLAUDE_MONITOR_DIR/limits/$1"
+}
 
 meta() { # pane, lim5, lim7, sub, acct, rst5
   printf 'ctx=30\ncost=1.00\nover=0.00\nlim5=%s\nlim7=%s\nrst5=%s\nrst7=%s\nsub=%s\nacct=%s\nmodel=Opus\nsession=s-%s\nts=%s\n' \
@@ -158,6 +184,7 @@ settle() {
       ACC_N[$ACC_I]=$((ACC_N[$ACC_I] + 1))
     i=$((i + 1))
   done
+  monitor_acc_remembered
   monitor_acc_order
   monitor_acc_tags
 }
@@ -212,9 +239,21 @@ assert_eq "the api session is not counted on it" "1" \
   "$(monitor_acc_find os@pailab.co && echo "${ACC_N[$ACC_I]}")"
 assert_eq "it is keyed apart" "api" "${X_ACCT[1]}"
 
-header "a superseded reading leaves the account with no numbers, not old ones"
+header "a superseded window loses its number; the one beside it keeps its own"
+# The two windows roll at completely different rates, so they are judged apart: a
+# reading from six hours ago has outlived its 5-hour window and not its weekly
+# one, and the weekly figure is the one worth keeping.
 SESSIONS=(one); P_PANE=(%1)
 meta 1 8 46 1 os@pailab.co "$BEHIND"
+settle
+assert_eq "the line is still drawn" "1" "$ACC_SHOWN"
+assert_eq "the rolled window is blank, the weekly one is not" \
+  " 46" "$(limits_of os@pailab.co)"
+
+header "a reading with nothing current left in it is not taken at all"
+SESSIONS=(one); P_PANE=(%1)
+printf 'ctx=30\ncost=1.00\nlim5=8\nlim7=46\nrst5=%s\nrst7=%s\nsub=1\nacct=os@pailab.co\nsession=s-1\nts=%s\n' \
+  "$BEHIND" "$BEHIND" "$NOW" > "$CLAUDE_MONITOR_DIR/9-1.meta"
 settle
 assert_eq "the line is still drawn" "1" "$ACC_SHOWN"
 assert_eq "with nothing on it" " " "$(limits_of os@pailab.co)"
@@ -276,6 +315,132 @@ assert_not_contains "not at 46" "FULL" "$ACC_WIN"
 assert_eq "nor the flag" "" "$ACC_WIN_HOT"
 monitor_acc_window -1 ""
 assert_eq "and an unknown window is blank, not zero" "" "$(echo "$ACC_WIN" | tr -d ' ')"
+
+# ── accounts the fleet has left ──────────────────────────────────────
+
+header "an account with nothing live on it keeps its line and its windows"
+# The whole point: you switch away because a window is full, and full is exactly
+# what you need to keep seeing -- along with when it comes back.
+SESSIONS=(one); P_PANE=(%1)
+rm -f "$CLAUDE_MONITOR_DIR"/9-*.meta
+meta 1 3 5 1 new@example.com "$AHEAD"
+limits_file old@example.com 97 88 "$AHEAD"
+settle
+assert_eq "both accounts get a line" "2" "$ACC_SHOWN"
+assert_eq "the one that is running" "3 5" "$(limits_of new@example.com)"
+assert_eq "and the one that is not, out of the ledger" "97 88" "$(limits_of old@example.com)"
+assert_eq "with no sessions counted on it" "0" \
+  "$(monitor_acc_find old@example.com && echo "${ACC_N[$ACC_I]}")"
+assert_eq "the live one is not marked as left" "" \
+  "$(monitor_acc_find new@example.com && echo "${ACC_OFF[$ACC_I]}")"
+assert_eq "the other one is" "1" \
+  "$(monitor_acc_find old@example.com && echo "${ACC_OFF[$ACC_I]}")"
+
+header "the live accounts come first, then the ones the fleet has left"
+# So a line does not jump between the halves as sessions come and go, and the
+# accounts something is actually running on stay at the top.
+SESSIONS=(one); P_PANE=(%1)
+rm -f "$CLAUDE_MONITOR_DIR"/limits/*
+meta 1 3 5 1 zeta@example.com "$AHEAD"
+limits_file alpha@example.com 10 10 "$AHEAD"
+limits_file omega@example.com 20 20 "$AHEAD"
+settle
+ORDER=""
+for idx in "${ACC_ORDER[@]}"; do ORDER="$ORDER ${ACC_KEY[$idx]}"; done
+assert_eq "the running one, then the rest alphabetically" \
+  " zeta@example.com alpha@example.com omega@example.com" "$ORDER"
+rm -f "$CLAUDE_MONITOR_DIR/limits/alpha@example.com" \
+      "$CLAUDE_MONITOR_DIR/limits/omega@example.com"
+
+header "a session's own reading still beats the one on file"
+# The ledger holds whatever was filed last, which on a live account is the same
+# reading a session is exporting -- so it goes through the same newest-wins rule
+# rather than around it.
+SESSIONS=(one); P_PANE=(%1)
+rm -f "$CLAUDE_MONITOR_DIR"/9-*.meta "$CLAUDE_MONITOR_DIR"/limits/*
+meta 1 42 44 1 os@pailab.co "$AHEAD"
+limits_file os@pailab.co 8 9 "$AHEAD" "$((NOW - 60))"
+settle
+assert_eq "the newer reading wins" "42 44" "$(limits_of os@pailab.co)"
+assert_eq "and the account is live, not remembered" "" \
+  "$(monitor_acc_find os@pailab.co && echo "${ACC_OFF[$ACC_I]}")"
+
+header "a ledger reading newer than every session's is the one shown"
+# What a /login looks like on the account you moved to: the session that answered
+# has since gone, and its reading is the only current one there is.
+limits_file os@pailab.co 61 62 "$AHEAD" "$((NOW + 60))"
+settle
+assert_eq "the ledger's" "61 62" "$(limits_of os@pailab.co)"
+
+header "an account left hours ago keeps the weekly window it was left on"
+# The case this is all for. Six hours after the switch the 5-hour figure describes
+# a window that has rolled, and the weekly one -- the reason you switched -- does
+# not.
+SESSIONS=(); P_PANE=()
+rm -f "$CLAUDE_MONITOR_DIR"/9-*.meta "$CLAUDE_MONITOR_DIR"/limits/*
+limits_file old@example.com 97 88 "$BEHIND"
+settle
+assert_eq "the line is still drawn" "1" "$ACC_SHOWN"
+assert_eq "the 5h is gone and the 7d is not" " 88" "$(limits_of old@example.com)"
+
+header "an account not used for a week and a day is not kept"
+rm -f "$CLAUDE_MONITOR_DIR"/limits/*
+limits_file stale@example.com 97 88 "$AHEAD" "$((NOW - 8 * 86400 - 60))"
+settle
+assert_eq "no line for it" "0" "$ACC_SHOWN"
+limits_file fresh@example.com 97 88 "$AHEAD" "$((NOW - 6 * 86400))"
+settle
+assert_eq "one still inside the window keeps its own" "1" "$ACC_SHOWN"
+
+header "a remembered account does not put an account column on the rows"
+# The column is there to tell one session's account from another's, and a
+# remembered account has no sessions to tell apart.
+SESSIONS=(one); P_PANE=(%1)
+rm -f "$CLAUDE_MONITOR_DIR"/limits/*
+meta 1 3 5 1 new@example.com "$AHEAD"
+limits_file old@example.com 97 88 "$AHEAD"
+settle
+assert_eq "two lines in the block" "2" "$ACC_SHOWN"
+assert_eq "but one account on the rows" "1" "$ACC_TAGGED"
+
+header "a remembered account does not take the header's own pair away"
+# The fallback is for a fleet whose sessions name no account at all. A line from
+# the ledger is not one of those sessions answering, so it must not stand in for
+# them.
+SESSIONS=(one); P_PANE=(%1)
+meta 1 8 46 1 "" "$AHEAD"
+settle
+assert_eq "the remembered account still has its line" "1" "$ACC_SHOWN"
+assert_eq "and no live account to replace the header" "0" "$ACC_LIVE"
+assert_eq "so the header keeps its 5h" "8" "$X_LIM5"
+assert_eq "and its 7d" "46" "$X_LIM7"
+
+header "whatever else is in the directory is not read as an account"
+rm -f "$CLAUDE_MONITOR_DIR"/limits/*
+printf 'lim5=1\nlim7=1\nrst5=%s\nrst7=%s\nts=%s\n' "$AHEAD" "$AHEAD" "$NOW" \
+  > "$CLAUDE_MONITOR_DIR/limits/.tmp.4242"
+settle
+assert_eq "a temp file caught mid-rename is not a line" "0" "$ACC_SHOWN"
+rm -f "$CLAUDE_MONITOR_DIR/limits/.tmp.4242"
+
+header "a remembered line says 0 sess, and is drawn dim"
+SESSIONS=(); P_PANE=()
+rm -f "$CLAUDE_MONITOR_DIR"/9-*.meta "$CLAUDE_MONITOR_DIR"/limits/*
+limits_file old@example.com 97 88 "$AHEAD"
+settle
+monitor_acc_row 90 "${ACC_ORDER[0]}"
+assert_contains "the count that marks it" "0 sess" "$ACC_ROW"
+assert_eq "the address is dimmed with the rest of the line" \
+  "  $C_DIM" "${ACC_ROW%%old@*}"
+assert_contains "and the window it was left on is still there" "97%" "$ACC_ROW"
+
+header "a live account's address is not dimmed"
+SESSIONS=(one); P_PANE=(%1)
+meta 1 3 5 1 new@example.com "$AHEAD"
+settle
+monitor_acc_row 90 "${ACC_ORDER[0]}"
+assert_eq "nothing between the indent and the name" \
+  "  " "${ACC_ROW%%new@*}"
 
 header "the line is cut to the terminal rather than wrapped"
 # A wrapped line shifts every row under it, which breaks the redraw-in-place.
