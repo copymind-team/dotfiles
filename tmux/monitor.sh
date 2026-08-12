@@ -1857,6 +1857,29 @@ key_index() { # position of $1 in KEYS, or -1
 # up must not jump to a session.
 K_NONE=$'\a'
 
+# How long a byte of a key sequence is waited for. bash 4.0 was the first to take
+# a fraction here; 3.2 -- what macOS ships as /bin/bash, and what this runs under
+# whenever a newer one is not on PATH -- rejects one outright, and the read fails
+# instead of waiting. That is what used to make every arrow key quit the monitor:
+# the tail of the sequence was never read, so the esc that began it came back on
+# its own.
+#
+# Whole seconds are all 3.2 has, and T_ESC is only ever waited out by an esc
+# pressed alone: the rest of a real sequence is already in the buffer by the time
+# the esc has been read. So an arrow stays instant there, and only quitting gets
+# slower.
+#
+# T_POLL drains the keys typed while the last tick was drawing, so it must not
+# wait at all. 3.2 has no value that does not: -t 0 fails whether or not a key is
+# waiting. There the drain is skipped and keys are applied one frame at a time.
+if [ "${BASH_VERSINFO[0]:-3}" -ge 4 ]; then
+  T_ESC=0.05
+  T_POLL=0.001
+else
+  T_ESC=1
+  T_POLL=
+fi
+
 # One keypress, waiting $1 seconds for it, with the arrow keys reported as the
 # hjkl they stand in for. Without that an arrow would read as a bare esc and quit
 # the monitor.
@@ -1873,8 +1896,8 @@ K_NONE=$'\a'
 # than sharing one window between them: a keypress whose bytes arrive apart, which
 # over a slow link they do, reads as an arrow instead of quitting the monitor.
 #
-# The fractional timeout is what distinguishes "esc alone" from "esc starting a
-# sequence"; bash 3.2 rejects it, and there an arrow quits.
+# The timeout is what distinguishes "esc alone" from "esc starting a sequence";
+# see T_ESC above for what it is worth on each bash.
 monitor_key() {
   local k c t=$1
   IFS= read -rsn1 -t "$t" k || return 1
@@ -1882,7 +1905,7 @@ monitor_key() {
 
   # Nothing behind the esc, or something that cannot begin a key sequence: the
   # user pressed esc, which closes the monitor.
-  IFS= read -rsn1 -t 0.05 c 2>/dev/null || c=""
+  IFS= read -rsn1 -t "$T_ESC" c 2>/dev/null || c=""
   case $c in
     '['|'O') ;;
     *) printf '%s' $'\033'; return ;;
@@ -1891,7 +1914,7 @@ monitor_key() {
   # The letter that says which key it was comes last, after any parameters; only
   # the letter matters here, so the parameters are read and dropped.
   k=""
-  while IFS= read -rsn1 -t 0.05 c 2>/dev/null; do
+  while IFS= read -rsn1 -t "$T_ESC" c 2>/dev/null; do
     case $c in
       [0-9]|';') continue ;;
       *) k=$c; break ;;
@@ -1960,7 +1983,8 @@ run_monitor() {
             ;;
         esac
         [ -n "$leave" ] && break
-        key=$(monitor_key 0.001) || break
+        [ -n "$T_POLL" ] || break   # no poll on this bash: one key per frame
+        key=$(monitor_key "$T_POLL") || break
       done
       [ -n "$leave" ] && break
       # A cursor move redraws from what the last tick collected; anything else
