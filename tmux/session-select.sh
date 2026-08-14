@@ -66,16 +66,16 @@ fi
 
 # --- sessions ---------------------------------------------------------------
 
-# "windows|attached|name", alphabetical by name -- the same order as
+# "attached|name", alphabetical by name -- the same order as
 # `choose-session -O name`. The name goes last because it is the one field that
 # may contain "|": as the final variable of a `read` it gets the unsplit
 # remainder, so it cannot shift the others.
 picker_sessions() {
   tmux list-sessions \
-      -F '#{session_windows}|#{?session_attached,attached,}|#{session_name}' \
+      -F '#{?session_attached,attached,}|#{session_name}' \
       2>/dev/null |
     { if [ -n "$FILTER" ]; then grep -E "$FILTER"; else cat; fi } |
-    LC_ALL=C sort -t'|' -k3,3
+    LC_ALL=C sort -t'|' -k2,2
 }
 
 # Client this picker acts on. The key binding passes it in as PICKER_CLIENT --
@@ -141,7 +141,7 @@ picker_kill() {
 # a name could still be cut mid-glyph, which is what the old `cut -c` fallback
 # did anyway.)
 
-ENTRIES=()    # "windows|attached|name", as listed
+ENTRIES=()    # "attached|name", as listed
 SESSIONS=()   # just the names, same order
 ROWKEYS=()    # the jump key of each, same order; " " for the ones past the last
 ROWS_USED=0   # rows the last render laid out, i.e. what one column step is worth
@@ -157,7 +157,6 @@ picker_load() {
   ROWKEYS=()
   while IFS= read -r line; do
     name=${line#*|}
-    name=${name#*|}
     [ -n "$name" ] || continue
     ENTRIES+=("$line")
     SESSIONS+=("$name")
@@ -193,12 +192,13 @@ picker_index_of() { # position of session $1 in SESSIONS, or -1
 # footer too, for a client so short that even the columns do not fit.
 render() {
   local cur=$1 w=$2 cols=$3 chrome=${4:-1} maxrows=${5:-0} sel=${6:--1}
-  local colw nw wins att name key mark cell i n rows shown r c idx line out=""
+  local colw nw att name key mark cell i n rows shown r c idx line out=""
   local -a cells=()
 
   [ "$cols" -ge 1 ] 2>/dev/null || cols=1
   colw=$((w / cols))
-  nw=$((colw - 10))
+  # Two columns of cursor mark, the key, a space, the attach mark, then the name.
+  nw=$((colw - 5))
   [ "$nw" -lt 8 ] && nw=8
 
   n=${#ENTRIES[@]}
@@ -207,10 +207,8 @@ render() {
     # Split with parameter expansion, not `read <<<`: a here-string per row means
     # a temporary file per row, and this loop runs on every keystroke.
     line=${ENTRIES[$i]}
-    wins=${line%%|*}
-    att=${line#*|}
-    name=${att#*|}
-    att=${att%%|*}
+    att=${line%%|*}
+    name=${line#*|}
     key=${ROWKEYS[$i]}
     # The session this client is on is marked, not hidden, so the keys stay put
     # no matter which session you press prefix+S from.
@@ -228,14 +226,13 @@ render() {
       # what makes it a bar the full width of the column. No inner resets: one
       # would end the highlight halfway across the row. The mark is kept as well,
       # so the cursor is still visible with colors off.
-      printf -v cell '%s▸ %s %s%-*s  %2sw%s' \
-        "$C_REV" "$key" "$mark" "$nw" "$name" "$wins" "$C_RST"
+      printf -v cell '%s▸ %s %s%-*s%s' \
+        "$C_REV" "$key" "$mark" "$nw" "$name" "$C_RST"
     else
-      printf -v cell '  %s%s%s %s%s%s%-*s%s  %s%2sw%s' \
+      printf -v cell '  %s%s%s %s%s%s%-*s%s' \
         "$C_BOLD" "$key" "$C_RST" \
         "$C_YEL" "$mark" "$C_RST" \
-        "$nw" "$name" "$C_RST" \
-        "$C_DIM" "$wins" "$C_RST"
+        "$nw" "$name" "$C_RST"
     fi
     cells+=("$cell")
     i=$((i + 1))
