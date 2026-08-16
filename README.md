@@ -73,7 +73,8 @@ dotfiles/
 │   ├── session-select.sh         # leader+S session picker
 │   ├── claude-save.sh            # resurrect hook -> pane -> claude session map
 │   ├── claude-restore.sh         # resurrect process -> claude --resume
-│   └── claude-snapshot.sh        # claude session start/exit -> resurrect save
+│   ├── claude-snapshot.sh        # claude session start/exit -> resurrect save
+│   └── resurrect-guard.sh        # one save at a time, one per second
 ├── zsh/
 │   ├── .zshrc
 │   └── completions/_dev          # Tab completion for the dev CLI

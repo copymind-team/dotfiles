@@ -29,7 +29,11 @@
 # a person decided.
 set -uo pipefail
 
-SAVE=${CLAUDE_RESURRECT_SAVE:-$HOME/.tmux/plugins/tmux-resurrect/scripts/save.sh}
+# Through the guard rather than straight at save.sh: the saves taken here are the
+# ones most likely to land in the same second as continuum's timer, and that
+# collision deletes the file resurrect's "last" symlink points at. See
+# resurrect-guard.sh.
+SAVE=${CLAUDE_RESURRECT_SAVE:-$HOME/.tmux/resurrect-guard.sh}
 SESSION_DIR=${CLAUDE_SESSION_DIR:-$HOME/.claude/sessions}
 STAMP=${CLAUDE_SNAPSHOT_STAMP:-$HOME/.claude/resurrect-snapshot}
 
