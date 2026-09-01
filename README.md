@@ -195,8 +195,49 @@ Manages env vars across three places at once: `.env.example` (committed inventor
                                         30d $2620.11  sub ~$2540.11  api $80.00
                                         all $8841.66  sub ~$8601.66  api $240.00
 
-  j/k move   enter jump   1-9/a-z jump directly   r refresh   q back
+  $1200 ┤                                                  ▃
+        │▅ █         ▁                                     █
+   $600 ┤█ █ ▁     ▁ █   ▄       ▄ ▁ █ ▃       ▄ ▄   ▁   ▅ █
+        │█ █ █   ▂ █ █ ▄ █   ▃ ▁ █ █ █ █ ▂ ▂ ▄ █ █ ▆ █ ▁ █ █
+     $0 └──┴─────┴─────┴─────┴─────┴─────┴─────┴───────────┴─
+         07/08 10/08 13/08 16/08 19/08 22/08 25/08      31/08
+
+  j/k move   enter jump   1-9/a-z jump directly   u usage   r refresh   q back
 ```
+
+Under the totals, the last month of spending: dollars up the side, a day per
+column. It appears when the terminal has rows to spare for it, and gives them
+back to the sessions when it does not.
+
+`u` — the same chart with the whole screen, and the whole history:
+
+```
+ USAGE  26 days  total $9370.33  avg $360.39/day  peak $1033.06 Mon 31 Aug
+
+$1250 ┤
+      │                                                                     ▂
+$1000 ┤                     ▁                                               █
+      │                   ▂ █                                               █
+ $750 ┤                   █ █         ▃                                     █
+      │                   █ █         █               █                     █
+ $500 ┤                   █ █         █   ▅       ▆   █ ▂       ▇ ▅       █ █
+      │                   █ █ ▆     ▇ █   █       █ ▆ █ █       █ █   ▇   █ █
+ $250 ┤                   █ █ █     █ █ ▃ █       █ █ █ █     ▃ █ █ ▆ █   █ █
+      │                   █ █ █   ▅ █ █ █ █   █ ▄ █ █ █ █ ▅ ▆ █ █ █ █ █ ▁ █ █
+   $0 └─────────────────────┴─────┴─────┴─────┴─────┴─────┴─────┴───────────┴─
+                          07/08 10/08 13/08 16/08 19/08 22/08 25/08      31/08
+
+  h/l older/newer   j/k by week   u sessions   r refresh   q back
+```
+
+Days nothing ran are the gaps they were, today is bold — it is still being
+written — and a column carries the subscription and API-billed parts of its day
+in different colors, with a line under the chart naming them when a history has
+both. The axis is scaled to the days on screen and labelled in round money; a
+day too small for a row still gets an eighth of one. Wider terminals fit more
+days, `h`/`l` walk a day and `j`/`k` a week, and `q` goes back to the sessions
+rather than out — the small chart downstairs stays on today whatever this one is
+scrolled to.
 
 Both need the [Claude Code config](#claude-code-config) installed for the context
 and cost columns; without it the states still work.

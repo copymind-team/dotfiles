@@ -12,6 +12,13 @@
 # r refreshes now, q (or esc) closes the monitor and puts the client back on the
 # session it came from.
 #
+# Under the rows, where the screen has room for it: the last month of spending as
+# a small chart, dollars up the side and one column per day along the bottom.
+#
+# u opens that chart full size, with the whole history behind it. There h/l are a
+# day and j/k a week, u goes back to the fleet, and q does too -- it only closes
+# the monitor from the fleet screen.
+#
 # Every session is listed except the monitor itself. For each one it picks the
 # pane to report on: a pane actually running Claude, else one in a window named
 # $MONITOR_WINDOW, else the session's active pane.
@@ -24,16 +31,17 @@
 #
 # The status line also keeps two ledgers there that outlive the sessions
 # themselves: what every session has spent, day by day, which is where the day,
-# week, month and all-time figures on the total line come from, and each account's
-# last usage reading, which is what keeps an account on screen after the fleet has
-# switched off it.
+# week, month and all-time figures on the total line come from -- and every day
+# of the chart on 'u' -- and each account's last usage reading,
+# which is what keeps an account on screen after the fleet has switched off it.
 #
 # Tunables: MONITOR_INTERVAL (seconds, default 2), MONITOR_WINDOW (preferred
 # window name, default "claude"), MONITOR_FILTER (regex; only sessions matching
 # it are listed, default all), MONITOR_SESSION (default "monitor"),
 # CLAUDE_MONITOR_DIR (default ~/.claude/monitor), MONITOR_STALE (seconds an
 # exported state stays trusted, default 90), MONITOR_ACCT_KEEP (seconds an
-# account with nothing live on it keeps its line, default 8 days).
+# account with nothing live on it keeps its line, default 8 days),
+# MONITOR_HISTORY_DAYS (days the usage chart reaches back, default 3660).
 set -uo pipefail
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -51,8 +59,9 @@ SESSION_DIR=${CLAUDE_SESSION_DIR:-$HOME/.claude/sessions}
 
 # Digits first (natural for the first handful), then letters. 'q' and 'r' are
 # left out on purpose -- they are quit and refresh -- and so are hjkl, which move
-# the cursor. 29 keys in total; past that, use the cursor.
-KEYS="123456789abcdefgimnopstuvwxyz"
+# the cursor, and 'u', which opens the usage chart. 28 keys in total; past that,
+# use the cursor.
+KEYS="123456789abcdefgimnopstvwxyz"
 
 # --- terminal control -------------------------------------------------------
 # Kept as variables rather than printf escapes so the same strings work in sed
@@ -936,6 +945,51 @@ monitor_day_ago() {
 
 day_ge() { [ "$1" = "$2" ] || [[ $1 > $2 ]]; }
 
+# The day before an ISO date, in bash alone. The usage view walks the calendar a
+# day at a time -- a day the ledger has no file for is a day nothing ran, and is
+# drawn as the zero it is -- and a fork per day walked would cost more than the
+# whole chart.
+DAY_PREV=""
+monitor_day_prev() {
+  local y=$((10#${1:0:4})) m=$((10#${1:5:2})) d=$((10#${1:8:2}))
+  d=$((d - 1))
+  if [ "$d" -lt 1 ]; then
+    m=$((m - 1))
+    [ "$m" -lt 1 ] && { m=12; y=$((y - 1)); }
+    case $m in
+      1|3|5|7|8|10|12) d=31 ;;
+      4|6|9|11)        d=30 ;;
+      *) d=28
+         if [ $((y % 4)) -eq 0 ] &&
+            { [ $((y % 100)) -ne 0 ] || [ $((y % 400)) -eq 0 ]; }; then
+           d=29
+         fi
+         ;;
+    esac
+  fi
+  printf -v DAY_PREV '%04d-%02d-%02d' "$y" "$m" "$d"
+}
+
+# "Mon 06 Aug" for an ISO date, and which day of the week it was in DAY_DOW (0 is
+# Sunday). Sakamoto's method: a twelve-entry table and some integer division,
+# against a fork per column for `date`, on a screen that draws a column per day.
+#
+# The weekday is what makes the chart read as a calendar rather than as a list --
+# a run of quiet Saturdays is only visible if the Saturdays are named.
+DOW_NAMES=(Sun Mon Tue Wed Thu Fri Sat)
+MON_NAMES=(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)
+DOW_SHIFT=(0 3 2 5 0 3 5 1 4 6 2 4)
+DAY_LABEL=""
+DAY_DOW=0
+monitor_day_label() {
+  local y=$((10#${1:0:4})) m=$((10#${1:5:2})) d=$((10#${1:8:2}))
+  # January and February belong to the year before, which is what lets one
+  # formula cover the leap years.
+  [ "$m" -lt 3 ] && y=$((y - 1))
+  DAY_DOW=$(( (y + y / 4 - y / 100 + y / 400 + ${DOW_SHIFT[$((m - 1))]} + d) % 7 ))
+  DAY_LABEL="${DOW_NAMES[$DAY_DOW]} ${1:8:2} ${MON_NAMES[$((m - 1))]}"
+}
+
 # Cents and payment kind out of one ledger file. Read by bash itself, so a day of
 # files costs no forks at all. LDG_SUB is 1 subscription, 0 API-billed, -1 for a
 # session that never got far enough to say -- the same three values the status
@@ -971,6 +1025,10 @@ monitor_ledger_rebuild() {
   local f b d
   LDG_DAY=$MON_DAY
   LDG_P_ALL=(0 0 0); LDG_P_SUB=(0 0 0); LDG_P_API=(0 0 0)
+  # The usage view's day-by-day list is filed from this same pass; see the usage
+  # history section below for why it rides along here rather than reading the
+  # directory a second time.
+  LDG_H_DAY=(); LDG_H_ALL=(); LDG_H_SUB=(); LDG_H_API=(); HIST_KEY=""
   monitor_day_ago 6;  LDG_CUT7=$DAY_AGO
   monitor_day_ago 29; LDG_CUT30=$DAY_AGO
   [ -d "$LEDGER_DIR" ] || return 0
@@ -989,6 +1047,7 @@ monitor_ledger_rebuild() {
     [ "$d" = "$MON_DAY" ] && continue
     monitor_ledger_file "$f" || continue
     monitor_ledger_add 2
+    monitor_hist_file "$d"
     [ -n "$LDG_CUT30" ] && day_ge "$d" "$LDG_CUT30" && monitor_ledger_add 1
     [ -n "$LDG_CUT7" ] && day_ge "$d" "$LDG_CUT7" && monitor_ledger_add 0
   done
@@ -1004,6 +1063,7 @@ monitor_ledger_fmt() { printf -v LDG_FMT '%d.%02d' $(($1 / 100)) $(($1 % 100)); 
 monitor_read_ledger() {
   local f i t_all=0 t_sub=0 t_api=0 c
   SPEND_ALL=("" "" "" ""); SPEND_SUB=("" "" "" ""); SPEND_API=("" "" "" "")
+  LDG_T_ALL=0; LDG_T_SUB=0; LDG_T_API=0
   [ -n "$MON_DAY" ] && [ -d "$LEDGER_DIR" ] || return 0
   [ "$LDG_DAY" = "$MON_DAY" ] || monitor_ledger_rebuild
 
@@ -1017,6 +1077,10 @@ monitor_read_ledger() {
       0) t_api=$((t_api + LDG_CENTS)) ;;
     esac
   done
+
+  # Today, for the usage view: it walks the calendar and the rebuild above stops
+  # short of today, since today is still being written.
+  LDG_T_ALL=$t_all; LDG_T_SUB=$t_sub; LDG_T_API=$t_api
 
   # An empty ledger reads as unknown rather than zero, the same way a session
   # that has not reported leaves its cost column blank: nobody has spent nothing
@@ -1055,6 +1119,490 @@ monitor_read_ledger() {
     i=$((i + 1))
   done
   return 0
+}
+
+# --- usage history ------------------------------------------------------------
+#
+# The same ledger the windows above total, kept day by day instead of summed into
+# four figures, so the whole run of it can be drawn: one column per calendar day
+# for as far back as the files go. That is the 'u' screen; see monitor_draw_usage.
+#
+# Calendar, not directory listing: a day with no file is a day nothing ran, and a
+# chart that skips those reads as a busier month than it was. So the days between
+# the files are walked and drawn as the zeros they are.
+#
+# The days themselves are filed by monitor_ledger_rebuild, which is already
+# reading every file once a day -- a pass of our own would double the only
+# expensive read the monitor makes. Its glob expands in name order, so one day's
+# files arrive together and each bucket is closed before the next one opens: no
+# lookup per file, and no associative array, which bash 3.2 does not have.
+
+# How far back the chart goes. Not a display limit -- the view scrolls -- but a
+# floor under the walk: one file with a bad date on it (a clock that came up in
+# 1970) would otherwise put fifty thousand empty days between then and now.
+HIST_DAYS=${MONITOR_HISTORY_DAYS:-3660}
+
+# Sparse: only the days with files, oldest first, today excluded. The rebuild
+# skips today because today is still being written; monitor_read_ledger has it
+# fresh every tick and hands it over in LDG_T_*.
+LDG_H_DAY=()
+LDG_H_ALL=()
+LDG_H_SUB=()
+LDG_H_API=()
+LDG_T_ALL=0
+LDG_T_SUB=0
+LDG_T_API=0
+
+# Dense: every calendar day from today back to the oldest the ledger knows, gaps
+# and all. Newest first -- index 0 is today -- because the walk that builds it
+# runs backwards from today, so HIST_DAYS cuts the far end off rather than the
+# end anyone is looking at.
+HIST_DAY=()
+HIST_ALL=()
+HIST_SUB=()
+HIST_API=()
+HIST_MAX=0     # the biggest day, which is what the bars are scaled against
+HIST_PEAK=""   # and which day that was
+HIST_TOTAL=0   # every day added up, with the split under it
+HIST_SUB_ALL=0
+HIST_API_ALL=0
+HIST_KEY=""    # what the dense list was built from; see monitor_hist_build
+
+# Files one ledger file's cents under its day. Called from the rebuild, once per
+# file, with the day already peeled off the name and the file already read.
+monitor_hist_file() {
+  local d=$1 n=${#LDG_H_DAY[@]}
+  # A name can match the rebuild's glob and still not be a date -- "2026-13-45"
+  # does -- and one of those would put the calendar walk out of step with the
+  # days it is looking for. The windows can afford to count it; a chart with a
+  # column per day cannot.
+  case ${d:5:2} in 0[1-9]|1[0-2]) ;; *) return 0 ;; esac
+  case ${d:8:2} in 0[1-9]|[12][0-9]|3[01]) ;; *) return 0 ;; esac
+  if [ "$n" -eq 0 ] || [ "${LDG_H_DAY[$((n - 1))]}" != "$d" ]; then
+    LDG_H_DAY+=("$d"); LDG_H_ALL+=(0); LDG_H_SUB+=(0); LDG_H_API+=(0)
+    n=$((n + 1))
+  fi
+  n=$((n - 1))
+  LDG_H_ALL[$n]=$((${LDG_H_ALL[$n]} + LDG_CENTS))
+  case $LDG_SUB in
+    1) LDG_H_SUB[$n]=$((${LDG_H_SUB[$n]} + LDG_CENTS)) ;;
+    0) LDG_H_API[$n]=$((${LDG_H_API[$n]} + LDG_CENTS)) ;;
+  esac
+  return 0
+}
+
+# The dense list, out of the sparse days plus today's running total. Rebuilt only
+# when one of those has actually moved, so scrolling the chart redraws from what
+# is already here -- the same bargain the fleet's cursor makes upstairs.
+monitor_hist_build() {
+  local key n j d all sub api count
+  n=${#LDG_H_DAY[@]}
+  key="$MON_DAY:$n:$LDG_T_ALL:$LDG_T_SUB:$LDG_T_API"
+  [ "$key" = "$HIST_KEY" ] && return 0
+  HIST_KEY=$key
+  HIST_DAY=(); HIST_ALL=(); HIST_SUB=(); HIST_API=()
+  HIST_MAX=0; HIST_PEAK=""; HIST_TOTAL=0; HIST_SUB_ALL=0; HIST_API_ALL=0
+  # No clock, or a ledger with nothing in it at all: the view says so rather than
+  # drawing today as a zero, for the same reason the totals stay blank.
+  [ -n "$MON_DAY" ] && [ -n "$LDG_ANY" ] || return 0
+
+  # A file dated after today -- a machine whose clock or timezone has moved, or a
+  # session writing from the other side of a date line -- is counted in the
+  # windows and left off the chart, which ends at today.
+  j=$((n - 1))
+  while [ "$j" -ge 0 ] && ! day_ge "$MON_DAY" "${LDG_H_DAY[$j]}"; do
+    j=$((j - 1))
+  done
+
+  d=$MON_DAY
+  count=0
+  while [ "$count" -lt "$HIST_DAYS" ]; do
+    all=0; sub=0; api=0
+    if [ "$d" = "$MON_DAY" ]; then
+      all=$LDG_T_ALL; sub=$LDG_T_SUB; api=$LDG_T_API
+    elif [ "$j" -ge 0 ] && [ "${LDG_H_DAY[$j]}" = "$d" ]; then
+      all=${LDG_H_ALL[$j]}; sub=${LDG_H_SUB[$j]}; api=${LDG_H_API[$j]}
+      j=$((j - 1))
+    fi
+    HIST_DAY+=("$d"); HIST_ALL+=("$all"); HIST_SUB+=("$sub"); HIST_API+=("$api")
+    HIST_TOTAL=$((HIST_TOTAL + all))
+    HIST_SUB_ALL=$((HIST_SUB_ALL + sub))
+    HIST_API_ALL=$((HIST_API_ALL + api))
+    # Ties go to the later day, which is the one still in view when the chart is
+    # pinned to today.
+    [ "$all" -gt "$HIST_MAX" ] && { HIST_MAX=$all; HIST_PEAK=$d; }
+    count=$((count + 1))
+    # Nothing older left to reach: the days behind this one have no files, and
+    # rows of zero going back forever are not history.
+    [ "$j" -ge 0 ] || break
+    monitor_day_prev "$d"; d=$DAY_PREV
+  done
+  return 0
+}
+
+# --- usage view ---------------------------------------------------------------
+#
+# The second screen, on 'u': the ledger as a chart, dollars up the side and days
+# along the bottom. The fleet screen answers what is happening now and carries
+# four totals for scale; this one answers where the money went, which is a
+# question about days rather than about sessions.
+#
+# Drawn from the ledger alone -- no tmux, no captures -- so its tick costs a
+# directory of small files and nothing else. See monitor_tick.
+VIEW=fleet     # which screen is up: "fleet" or "usage"
+HIST_OFF=0     # how many of the newest days are scrolled off the right
+
+# Eighths of a row, growing up from the floor of a cell, so the top of a column
+# can land between two rows of the screen: at fifty dollars a row, a day rounded
+# to the nearest row is fifty dollars wrong.
+HIST_RISE=(' ' '▁' '▂' '▃' '▄' '▅' '▆' '▇')
+
+# Those glyphs at the width the columns came out at, built once per draw and used
+# by every cell after that. printf pads by bytes, so a run of a multibyte glyph
+# cannot be padded into place with %-*s and has to be repeated a glyph at a time.
+HIST_FULL=""   # a whole row of one column's bar
+HIST_CELL=()   # the eighths, indexed 0..7; 0 is the blank cell
+HIST_GAP=" "   # between one column and the next
+monitor_hist_glyphs() {
+  local bw=$1 i=0 j s
+  HIST_FULL=""; HIST_CELL=()
+  j=0
+  while [ "$j" -lt "$bw" ]; do HIST_FULL="${HIST_FULL}█"; j=$((j + 1)); done
+  while [ "$i" -lt 8 ]; do
+    s=""; j=0
+    while [ "$j" -lt "$bw" ]; do s="$s${HIST_RISE[$i]}"; j=$((j + 1)); done
+    HIST_CELL+=("$s")
+    i=$((i + 1))
+  done
+}
+
+# Rounds a figure up the ladder 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10 times a power
+# of ten -- the halves only above ten cents, where they are still whole cents.
+# What gets rounded is the step between two gridlines rather than the top of the
+# axis, so the labels come out as round money whatever the tallest day was.
+#
+# The ladder is as fine as it is because the small chart under the fleet has two
+# gridlines to work with: a coarser one would round its step so far up that the
+# tallest day only reached half the height it had.
+HIST_NICE=0
+monitor_hist_nice() {
+  local v=$1 p=1
+  [ "$v" -lt 1 ] && v=1
+  while [ $((v / p)) -ge 10 ]; do p=$((p * 10)); done
+  if   [ "$v" -le "$p" ];       then HIST_NICE=$p
+  elif [ "$p" -ge 10 ] && [ "$v" -le $((3 * p / 2)) ]; then HIST_NICE=$((3 * p / 2))
+  elif [ "$v" -le $((2 * p)) ]; then HIST_NICE=$((2 * p))
+  elif [ "$p" -ge 10 ] && [ "$v" -le $((5 * p / 2)) ]; then HIST_NICE=$((5 * p / 2))
+  elif [ "$v" -le $((3 * p)) ]; then HIST_NICE=$((3 * p))
+  elif [ "$v" -le $((4 * p)) ]; then HIST_NICE=$((4 * p))
+  elif [ "$v" -le $((5 * p)) ]; then HIST_NICE=$((5 * p))
+  elif [ "$v" -le $((6 * p)) ]; then HIST_NICE=$((6 * p))
+  elif [ "$v" -le $((8 * p)) ]; then HIST_NICE=$((8 * p))
+  else                               HIST_NICE=$((10 * p))
+  fi
+}
+
+# A gridline's label: whole dollars where the step is whole dollars, which a nice
+# step above a dollar always is, and cents below that.
+AXIS_FMT=""
+monitor_hist_axis_fmt() {
+  if [ $(($1 % 100)) -eq 0 ]; then
+    printf -v AXIS_FMT '$%d' $(($1 / 100))
+  else
+    printf -v AXIS_FMT '$%d.%02d' $(($1 / 100)) $(($1 % 100))
+  fi
+}
+
+# Each visible column, left to right: how many whole rows of bar it has, the
+# eighths on top of them, how many of those whole rows are api-coloured (counted
+# down from the top) and whether the eighths on top are too.
+COL_FULL=()
+COL_PART=()
+COL_API=()
+COL_CAPY=()
+
+# Builds the chart into PLOT_OUT -- the rows of columns, then the floor and the
+# dates under it -- for both the screen on 'u' and the small one under the
+# fleet's rows. Prints nothing: the callers frame it.
+#
+#   $1  rows to draw in, at most; rounded down to a whole number of gridlines
+#   $2  width to draw in, indent and gutter included
+#   $3  the widest a column may be, which is what keeps the small chart small
+#   $4  the most days to show, 0 for as many as fit
+#   $5  glyphs of indent in front of every line
+#
+# The days drawn are the newest that fit, less HIST_OFF. PLOT_COLS says how many
+# there were, which is what the caller's range and the scroll clamp go by.
+PLOT_OUT=""
+PLOT_COLS=0
+monitor_hist_plot() {
+  local rows=$1 width=$2 maxcolw=$3 maxcols=$4 pad=$5
+  local n i c r cols colw bw plotw gw ntick step ymax vismax
+  local line cur want g f p a lbl day tickx xpos axis="" xlab="" ind=""
+  local labelled=() LP_POS=() LP_COL=()
+  PLOT_OUT=""; PLOT_COLS=0
+  COL_FULL=(); COL_PART=(); COL_API=(); COL_CAPY=()
+  n=${#HIST_DAY[@]}
+  [ "$n" -gt 0 ] || return 0
+  printf -v ind '%*s' "$pad" ''
+
+  # Gridlines, and the rows made a whole multiple of them so that every line
+  # falls on a row of the screen rather than between two.
+  [ "$rows" -lt 2 ] && rows=2
+  if   [ "$rows" -ge 10 ]; then ntick=5
+  elif [ "$rows" -ge 8 ];  then ntick=4
+  else                          ntick=2
+  fi
+  rows=$(( (rows / ntick) * ntick ))
+  [ "$rows" -lt "$ntick" ] && rows=$ntick
+  step=$((rows / ntick))
+
+  # The gutter is sized off the tallest day in the whole history rather than the
+  # one on screen, so the chart does not shuffle sideways as it is scrolled.
+  vismax=$HIST_MAX
+  [ "$vismax" -lt 100 ] && vismax=100
+  monitor_hist_nice $((vismax / ntick))
+  monitor_hist_axis_fmt $((HIST_NICE * ntick))
+  gw=$((${#AXIS_FMT} + 2))
+
+  plotw=$((width - pad - gw))
+  [ "$plotw" -lt 4 ] && plotw=4
+
+  # As wide a column as the days allow, so a wide terminal is a wide chart rather
+  # than a narrow one with the screen empty beside it -- but no wider than the
+  # caller wants, and never under two, which is one glyph of bar and one of gap.
+  # At two, a history longer than the screen scrolls instead of shrinking.
+  cols=$n
+  [ "$maxcols" -gt 0 ] && [ "$cols" -gt "$maxcols" ] && cols=$maxcols
+  colw=$((plotw / cols))
+  [ "$colw" -gt "$maxcolw" ] && colw=$maxcolw
+  [ "$colw" -lt 2 ] && colw=2
+  [ "$cols" -gt $((plotw / colw)) ] && cols=$((plotw / colw))
+  [ "$cols" -lt 1 ] && cols=1
+  bw=$((colw - 1))
+  PLOT_COLS=$cols
+
+  # HIST_OFF is clamped here rather than by the keys: how many columns fit is
+  # known at the moment of drawing and nowhere else, so scrolling stops at the
+  # oldest day instead of running off into empty air.
+  [ "$HIST_OFF" -gt $((n - cols)) ] && HIST_OFF=$((n - cols))
+  [ "$HIST_OFF" -lt 0 ] && HIST_OFF=0
+
+  # The axis is scaled to the days on screen, and says so in its own labels: a
+  # window of quiet days uses the whole height rather than hugging the floor.
+  vismax=0
+  i=$HIST_OFF
+  while [ "$i" -lt $((HIST_OFF + cols)) ]; do
+    [ "${HIST_ALL[$i]}" -gt "$vismax" ] && vismax=${HIST_ALL[$i]}
+    i=$((i + 1))
+  done
+  [ "$vismax" -lt 100 ] && vismax=100
+  monitor_hist_nice $((vismax / ntick))
+  ymax=$((HIST_NICE * ntick))
+
+  # Every column measured once, so the rows below are a lookup and a glyph each.
+  i=$((HIST_OFF + cols - 1))     # the oldest visible day is the leftmost column
+  while [ "$i" -ge "$HIST_OFF" ]; do
+    f=${HIST_ALL[$i]}; a=${HIST_API[$i]}
+    if [ "$f" -gt 0 ]; then
+      p=$((f * rows * 8 / ymax))
+      # A day too small for an eighth still gets one: a chart that draws a
+      # hundred-dollar day as nothing is worse than one that draws it as little.
+      [ "$p" -eq 0 ] && p=1
+    else
+      p=0
+    fi
+    COL_FULL+=($((p / 8)))
+    COL_PART+=($((p % 8)))
+    # The api share is taken off the top of the column, in whole rows -- a
+    # boundary inside a row would want a glyph that is half one color and half
+    # the other -- and any api at all is worth a row, so a small real charge is
+    # not rounded into the notional part. Cents whose session never said how it
+    # was paying ride with the subscription end, which is where the windows put
+    # an unknown too.
+    r=$((p / 8))
+    c=0
+    if [ "$a" -gt 0 ] && [ "$f" -gt 0 ]; then
+      if [ "$r" -gt 0 ]; then
+        c=$((a * r / f))
+        [ "$c" -eq 0 ] && c=1
+      fi
+      COL_API+=("$c"); COL_CAPY+=(1)
+    else
+      COL_API+=(0); COL_CAPY+=(0)
+    fi
+    i=$((i - 1))
+  done
+
+  # Which columns carry a date under them, and where that date starts. Every ith
+  # column, counted from the right so that today always gets one, and i chosen so
+  # that two dates cannot touch: a date is five glyphs, and i columns is six or
+  # more.
+  #
+  # A date is centred on its column's tick, except that the rightmost one would
+  # hang off the end of the chart -- half of "31/08" is past the last column --
+  # so the whole run is shifted left by however much that one overhangs. Shifting
+  # them together is what keeps the spacing even: pulling back only the last one
+  # would leave it a glyph short of its neighbour, and that neighbour would be
+  # dropped for touching it.
+  i=$((6 / colw)); [ $((i * colw)) -lt 6 ] && i=$((i + 1))
+  tickx=$((bw / 2))          # the tick's glyph within a column
+  a=$(((cols - 1) * colw + tickx + 3 - cols * colw))   # the overhang, if any
+  [ "$a" -lt 0 ] && a=0
+  p=$((cols * colw))         # the leftmost glyph already spoken for
+  c=$((cols - 1))
+  while [ "$c" -ge 0 ]; do
+    f=$((c * colw + tickx - 2 - a))
+    if [ "$f" -ge 0 ] && [ $((f + 5)) -le "$p" ]; then
+      LP_POS+=("$f"); LP_COL+=("$c"); labelled[$c]=1
+      p=$((f - 1))           # a glyph of daylight between one date and the next
+    fi
+    c=$((c - i))
+  done
+
+  monitor_hist_glyphs "$bw"
+
+  r=$((rows - 1))
+  while [ "$r" -ge 0 ]; do
+    # A gridline every step rows, labelled with the money at the top of it. The
+    # rest of the rows carry the axis and nothing else.
+    if [ $(((r + 1) % step)) -eq 0 ]; then
+      monitor_hist_axis_fmt $(( (r + 1) * ymax / rows ))
+      printf -v line '%s%s%*s ┤%s' "$ind" "$C_DIM" $((gw - 2)) "$AXIS_FMT" "$C_RST"
+    else
+      printf -v line '%s%s%*s │%s' "$ind" "$C_DIM" $((gw - 2)) "" "$C_RST"
+    fi
+
+    cur=""
+    c=0
+    while [ "$c" -lt "$cols" ]; do
+      f=${COL_FULL[$c]}; p=${COL_PART[$c]}; a=${COL_API[$c]}
+      want=$cur
+      if [ "$r" -lt $((f - a)) ]; then
+        g=$HIST_FULL; want=$C_CYA
+      elif [ "$r" -lt "$f" ]; then
+        g=$HIST_FULL; want=$C_YEL
+      elif [ "$r" -eq "$f" ] && [ "$p" -gt 0 ]; then
+        g=${HIST_CELL[$p]}
+        if [ "${COL_CAPY[$c]}" = 1 ]; then want=$C_YEL; else want=$C_CYA; fi
+      else
+        g=${HIST_CELL[0]}
+      fi
+      if [ "$want" != "$cur" ]; then line="$line$want"; cur=$want; fi
+      line="$line$g$HIST_GAP"
+      c=$((c + 1))
+    done
+    [ -n "$cur" ] && line="$line$C_RST"
+    PLOT_OUT+="$line$T_EL"$'\n'
+    r=$((r - 1))
+  done
+
+  # The floor, with a tick under every column that has a date written under it.
+  monitor_hist_axis_fmt 0
+  printf -v axis '%s%s%*s └' "$ind" "$C_DIM" $((gw - 2)) "$AXIS_FMT"
+  c=0
+  while [ "$c" -lt "$cols" ]; do
+    p=0
+    while [ "$p" -lt "$colw" ]; do
+      if [ -n "${labelled[$c]:-}" ] && [ "$p" -eq "$tickx" ]; then
+        axis="${axis}┴"
+      else
+        axis="${axis}─"
+      fi
+      p=$((p + 1))
+    done
+    c=$((c + 1))
+  done
+  axis="$axis$C_RST"
+  PLOT_OUT+="$axis$T_EL"$'\n'
+
+  # And the dates themselves, laid down left to right out of the positions picked
+  # above -- which were picked from the right, so this walks them backwards.
+  xpos=0                     # glyphs of the date line written so far
+  c=$((${#LP_POS[@]} - 1))
+  while [ "$c" -ge 0 ]; do
+    p=${LP_POS[$c]}
+    i=$((HIST_OFF + cols - 1 - ${LP_COL[$c]}))
+    day=${HIST_DAY[$i]}
+    printf -v lbl '%*s' $((p - xpos)) ''
+    xlab="$xlab$lbl"
+    monitor_day_label "$day"
+    # Today is bold -- its column is short for the hour, not for the day -- and a
+    # weekend is dim, which is what makes the shape of a week readable.
+    case $DAY_DOW in 0|6) lbl=$C_DIM ;; *) lbl="" ;; esac
+    [ "$day" = "$MON_DAY" ] && lbl=$C_BOLD
+    xlab="$xlab$lbl${day:8:2}/${day:5:2}$C_RST"
+    xpos=$((p + 5))
+    c=$((c - 1))
+  done
+  printf -v lbl '%*s' "$((pad + gw))" ''
+  PLOT_OUT+="$C_DIM$lbl$xlab$C_RST$T_EL"$'\n'
+  return 0
+}
+
+# The whole screen on 'u': the chart with as much height and width as there is,
+# under a header of the figures it cannot draw.
+monitor_draw_usage() {
+  local h w n rows hdr="" legend="" tot day first
+  read -r h w <<<"$(term_size)"
+  monitor_hist_build
+  n=${#HIST_DAY[@]}
+
+  # The split is only worth a line when there is a split: one kind of payment is
+  # already named by the color of every column on screen.
+  if [ "$HIST_SUB_ALL" -gt 0 ] && [ "$HIST_API_ALL" -gt 0 ]; then
+    monitor_ledger_fmt "$HIST_SUB_ALL"; legend="  ${C_CYA}█${C_RST} sub ~\$$LDG_FMT"
+    monitor_ledger_fmt "$HIST_API_ALL"; legend="$legend   ${C_YEL}█${C_RST} api \$$LDG_FMT"
+  fi
+
+  if [ "$n" -eq 0 ]; then
+    { printf '%s%s%-*s%s%s\n' "$T_HOME" "${C_REV}${C_BOLD}" "$w" \
+        ' USAGE  no history yet' "$C_RST" "$T_EL"
+      printf '%s\n' "$T_EL"
+      printf '  nothing recorded yet -- see the Claude Code config for the exporter%s\n' "$T_EL"
+      printf '%s\n' "$T_EL"
+      printf '%s' "$T_ED"
+    } 2>/dev/null
+    return 0
+  fi
+
+  # Seven lines that are not chart -- the header, a blank, the floor, the dates, a
+  # blank, the help, and one left spare so the last newline cannot scroll the
+  # frame off the screen -- plus the legend when there is one.
+  rows=$((h - 7))
+  [ -n "$legend" ] && rows=$((rows - 1))
+  monitor_hist_plot "$rows" "$w" 10 0 0
+
+  # Days, then the three figures worth having above a chart: what it adds up to,
+  # what a day of it costs, and the worst day there was. When the window shows
+  # less than the whole history it says which days are on it. ASCII, like the
+  # fleet's bar: printf pads this by bytes.
+  monitor_ledger_fmt "$HIST_TOTAL"; tot=$LDG_FMT
+  printf -v hdr ' USAGE  %d days  total $%s' "$n" "$tot"
+  monitor_ledger_fmt $((HIST_TOTAL / n))
+  hdr="$hdr  avg \$$LDG_FMT/day"
+  if [ -n "$HIST_PEAK" ]; then
+    monitor_day_label "$HIST_PEAK"
+    monitor_ledger_fmt "$HIST_MAX"
+    hdr="$hdr  peak \$$LDG_FMT $DAY_LABEL"
+  fi
+  if [ "$PLOT_COLS" -lt "$n" ]; then
+    first=${HIST_DAY[$((HIST_OFF + PLOT_COLS - 1))]}
+    day=${HIST_DAY[$HIST_OFF]}
+    hdr="$hdr  showing ${first:8:2}/${first:5:2}-${day:8:2}/${day:5:2}"
+  fi
+
+  { printf '%s%s%-*s%s%s\n' "$T_HOME" "${C_REV}${C_BOLD}" "$w" "${hdr:0:$w}" "$C_RST" "$T_EL"
+    printf '%s\n' "$T_EL"
+    printf '%s' "$PLOT_OUT"
+    printf '%s\n' "$T_EL"
+    [ -n "$legend" ] && printf '%s%s\n' "$legend" "$T_EL"
+    printf '%s  %sh/l%s older/newer   %sj/k%s by week   %su%s sessions   %sr%s refresh   %sq%s back%s%s\n' \
+      "$C_DIM" "$C_RST$C_BOLD" "$C_RST$C_DIM" "$C_RST$C_BOLD" "$C_RST$C_DIM" \
+      "$C_RST$C_BOLD" "$C_RST$C_DIM" "$C_RST$C_BOLD" "$C_RST$C_DIM" \
+      "$C_RST$C_BOLD" "$C_RST$C_DIM" "$C_RST" "$T_EL"
+    printf '%s' "$T_ED"
+  } 2>/dev/null
 }
 
 # Reconciles what the screen says with what Claude's own events say.
@@ -1734,11 +2282,25 @@ monitor_collect() {
   done
 }
 
+# Whichever screen is up. Both draw from what the last tick collected and neither
+# talks to tmux, so a keystroke that only scrolls costs a redraw and nothing else.
+monitor_draw() {
+  if [ "$VIEW" = usage ]; then monitor_draw_usage; else monitor_draw_fleet; fi
+}
+
 # Draws what monitor_collect gathered. Talks to tmux not at all, and builds every
 # row with printf -v, so a keystroke that only moves the cursor costs a redraw and
 # nothing else.
-monitor_draw() {
+monitor_draw_fleet() {
   local h w i n state detail maxd pad row out="" acc="" hdr name ctx cost mark agents tagf tail
+  # Lines the screen has spent, for the chart at the bottom to see what is left:
+  # the header, a blank, a blank and the help, then the account block, then a row
+  # per session and per total as they are added.
+  local used=4
+  [ "$ACC_SHOWN" -gt 0 ] && used=$((used + ACC_SHOWN + 1))
+  # Shadowed for the length of the draw, so the small chart is pinned to today
+  # and the scroll position of the one on 'u' is left where the user put it.
+  local HIST_OFF=0
   read -r h w <<<"$(term_size)"
 
   # What every column before the detail takes: two spaces, the key, two spaces,
@@ -1752,6 +2314,7 @@ monitor_draw() {
   [ "$maxd" -lt 12 ] && maxd=12
 
   n=${#SESSIONS[@]}
+  used=$((used + n))
   i=0
   while [ "$i" -lt "$n" ]; do
     name=${SESSIONS[$i]}
@@ -1845,6 +2408,7 @@ monitor_draw() {
       monitor_total_row "$w" "$mark" active \
         "$X_COST_ALL" "$X_COST_SUB" "$X_COST_API" "$X_COST_OVER"
       out+="$ROW_OUT"
+      used=$((used + 1))
       mark=""
     fi
     i=0
@@ -1853,10 +2417,26 @@ monitor_draw() {
         monitor_total_row "$w" "$mark" "${SPEND_LBL[$i]}" \
           "${SPEND_ALL[$i]}" "${SPEND_SUB[$i]}" "${SPEND_API[$i]}" ""
         out+="$ROW_OUT"
+        used=$((used + 1))
         mark=""
       fi
       i=$((i + 1))
     done
+  fi
+
+  # And the chart under them, small: four rows of columns, the floor, and the
+  # dates. It goes in only when the screen has room to spare -- the fleet is what
+  # this screen is for, and a chart that pushed a session off the bottom would be
+  # the wrong trade -- and it is always pinned to today, whatever the full-size
+  # one on 'u' has been scrolled to.
+  #
+  # A month of days at two glyphs each, which is about sixty columns however wide
+  # the terminal is: enough to see the shape of a month without the chart taking
+  # the screen over. 'u' is there for the whole of it.
+  if [ "$n" -gt 0 ] && [ $((h - used - 1)) -ge 7 ]; then
+    monitor_hist_build
+    monitor_hist_plot 4 "$w" 2 30 2
+    [ -n "$PLOT_OUT" ] && out+="$T_EL"$'\n'"$PLOT_OUT"
   fi
 
   # The account block, between the header and the rows: one line per account,
@@ -1919,10 +2499,10 @@ monitor_draw() {
     printf '%s' "$acc"
     printf '%s' "$out"
     printf '%s\n' "$T_EL"
-    printf '%s  %sj/k%s move   %senter%s jump   %s1-9/a-z%s jump directly   %sr%s refresh   %sq%s back%s%s\n' \
+    printf '%s  %sj/k%s move   %senter%s jump   %s1-9/a-z%s jump directly   %su%s usage   %sr%s refresh   %sq%s back%s%s\n' \
       "$C_DIM" "$C_RST$C_BOLD" "$C_RST$C_DIM" "$C_RST$C_BOLD" "$C_RST$C_DIM" \
       "$C_RST$C_BOLD" "$C_RST$C_DIM" "$C_RST$C_BOLD" "$C_RST$C_DIM" \
-      "$C_RST$C_BOLD" "$C_RST$C_DIM" "$C_RST" "$T_EL"
+      "$C_RST$C_BOLD" "$C_RST$C_DIM" "$C_RST$C_BOLD" "$C_RST$C_DIM" "$C_RST" "$T_EL"
     printf '%s' "$T_ED"
   } 2>/dev/null
 }
@@ -2069,6 +2649,19 @@ monitor_raw_off() {
   SAVED_STTY=""
 }
 
+# A tick for whichever screen is up. The usage chart is drawn from the ledger
+# alone, so its tick skips the snapshot and the per-pane captures -- the whole
+# cost of a fleet tick -- and reads the day's files instead. Closing the chart
+# collects the fleet again before it is drawn, so nothing stale is left on it.
+monitor_tick() {
+  if [ "$VIEW" = usage ]; then
+    monitor_clock
+    monitor_read_ledger
+  else
+    monitor_collect
+  fi
+}
+
 run_monitor() {
   local key idx n leave moved
   printf '%s%s' "$T_ALT_ON" "$T_HIDE"
@@ -2083,7 +2676,7 @@ run_monitor() {
     monitor_draw
     if [ ! -t 0 ]; then
       sleep "$INTERVAL"   # no keyboard (piped/headless): just keep refreshing
-      monitor_collect
+      monitor_tick
       continue
     fi
 
@@ -2096,16 +2689,51 @@ run_monitor() {
       # crawls behind the keyboard and keeps moving after the key comes up.
       while :; do
         case $key in
-          q|$'\033') leave=1 ;;
-          r) ;;     # nothing to do: the collect below is the refresh
-          '') [ "$n" -gt 0 ] && monitor_switch "${SESSIONS[$SEL]}" ;;
-          j) moved=1; [ "$n" -gt 0 ] && { SEL=$(( (SEL + 1) % n )); SEL_NAME=${SESSIONS[$SEL]}; } ;;
-          k) moved=1; [ "$n" -gt 0 ] && { SEL=$(( (SEL - 1 + n) % n )); SEL_NAME=${SESSIONS[$SEL]}; } ;;
-          h|l) moved=1 ;;   # one column, so there is nowhere sideways to go
+          # One key for both screens: from the chart it goes back to the fleet,
+          # from the fleet it closes the monitor. Nothing can strand you on the
+          # screen you did not want.
+          q|$'\033')
+            if [ "$VIEW" = usage ]; then VIEW=fleet; moved=""; else leave=1; fi ;;
+          u)
+            if [ "$VIEW" = usage ]; then
+              VIEW=fleet; moved=""      # empty, so the fleet is collected again
+            else
+              VIEW=usage; HIST_OFF=0; moved=1
+            fi
+            ;;
+          r) ;;     # nothing to do: the tick below is the refresh
+          '') [ "$VIEW" = fleet ] && [ "$n" -gt 0 ] &&
+                monitor_switch "${SESSIONS[$SEL]}" ;;
+          # The cursor keys, which mean sessions on the fleet and days on the
+          # chart. h and l have nothing to do on a list one column wide; on the
+          # chart, where time runs left to right, they are the ones that mean
+          # anything -- left is older, right is newer -- and j/k step by the week,
+          # which is the stride you want when looking for the shape of a month.
+          j|k|h|l)
+            moved=1
+            if [ "$VIEW" = usage ]; then
+              case $key in
+                h) HIST_OFF=$((HIST_OFF + 1)) ;;
+                l) HIST_OFF=$((HIST_OFF - 1)) ;;
+                k) HIST_OFF=$((HIST_OFF + 7)) ;;
+                j) HIST_OFF=$((HIST_OFF - 7)) ;;
+              esac
+              # The far end is clamped by the draw, which is the only place that
+              # knows how many rows fit; this end needs no such help.
+              [ "$HIST_OFF" -lt 0 ] && HIST_OFF=0
+            else
+              case $key in
+                j) [ "$n" -gt 0 ] && { SEL=$(( (SEL + 1) % n )); SEL_NAME=${SESSIONS[$SEL]}; } ;;
+                k) [ "$n" -gt 0 ] && { SEL=$(( (SEL - 1 + n) % n )); SEL_NAME=${SESSIONS[$SEL]}; } ;;
+              esac
+            fi
+            ;;
           *)
-            idx=$(key_index "$key")
-            if [ "$idx" -ge 0 ] && [ "$idx" -lt "$n" ]; then
-              monitor_switch "${SESSIONS[$idx]}"
+            if [ "$VIEW" = fleet ]; then
+              idx=$(key_index "$key")
+              if [ "$idx" -ge 0 ] && [ "$idx" -lt "$n" ]; then
+                monitor_switch "${SESSIONS[$idx]}"
+              fi
             fi
             ;;
         esac
@@ -2114,11 +2742,11 @@ run_monitor() {
         key=$(monitor_key "$T_POLL") || break
       done
       [ -n "$leave" ] && break
-      # A cursor move redraws from what the last tick collected; anything else
-      # goes and looks again.
-      [ -n "$moved" ] || monitor_collect
+      # A cursor move or a scroll redraws from what the last tick collected;
+      # anything else goes and looks again.
+      [ -n "$moved" ] || monitor_tick
     else
-      monitor_collect   # the interval ran out: time for a fresh tick
+      monitor_tick   # the interval ran out: time for a fresh tick
     fi
   done
   # The terminal goes back first so the pane is left clean, then the client is
